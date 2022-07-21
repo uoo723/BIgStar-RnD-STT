@@ -1,0 +1,76 @@
+from typing import Any
+
+import click
+import torch
+from datasets import load_dataset
+from jiwer import cer, wer
+from logzero import logger
+from transformers import (
+    AutoModelForCTC,
+    AutoProcessor,
+)
+from attrdict import AttrDict
+from functools import partial
+
+
+def map_to_pred(batch, processor, model, device):
+    inputs = processor(
+        [b["array"] for b in batch["audio"]],
+        sampling_rate=16_000,
+        return_tensors="pt",
+        padding="longest",
+    ).input_values.to(device)
+
+    with torch.inference_mode():
+        logits = model(inputs).logits.cpu()
+
+    pred_ids = logits.argmax(dim=-1)
+    pred = processor.batch_decode(pred_ids)
+    batch["pred"] = pred
+
+    return batch
+
+
+@click.command(context_settings={"show_default": True})
+@click.option(
+    "--dataset-name",
+    type=click.STRING,
+    default="kresnik/zeroth_korean",
+    help="Set datasetname",
+)
+@click.option("--cache-dir", type=click.STRING, help="Dataset cache directory")
+@click.option("--batch-size", type=click.INT, default=16, help="Batch size")
+@click.option("--no-cuda", is_flag=True, default=False, help="Disable CUDA")
+def main(**args: Any):
+    args = AttrDict(args)
+
+    logger.info(f"GPU Available: {torch.cuda.is_available()}")
+    logger.info(f"Use GPU: {not args.no_cuda}")
+
+    device = torch.device("cuda" if not args.no_cuda else "cpu")
+
+    model_name = "kresnik/wav2vec2-large-xlsr-korean"
+
+    logger.info("Load Model...")
+    processor = AutoProcessor.from_pretrained(model_name)
+    model = AutoModelForCTC.from_pretrained(model_name).to(device)
+
+    ds = load_dataset(args.dataset_name, "clean", cache_dir=args.cache_dir)
+
+    logger.info("Start Test...")
+    results = ds["test"].map(
+        partial(map_to_pred, processor=processor, model=model, device=device),
+        batched=True,
+        batch_size=args.batch_size,
+    )
+
+    gt = results["text"]
+    pred = results["pred"]
+
+    logger.info("Evaluation Results")
+    logger.info(f"WER: {wer(gt, pred):.2%}")
+    logger.info(f"CER: {cer(gt, pred):.2%}")
+
+
+if __name__ == "__main__":
+    main()
