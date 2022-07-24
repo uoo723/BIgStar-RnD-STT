@@ -106,13 +106,8 @@ _dataset_options = [
     optgroup.option("--num-pos", type=click.INT, default=1, help="# of positive samples"),
 ]
 
-_submission_options = [
-    optgroup.group("Submission Options"),
-    optgroup.option("--submission-output", type=click.Path(), default="./submissions/submission.csv", help="Output path for submssion"),
-    optgroup.option("--topk-filepath", type=click.Path(exists=True), help="Topk candidate list files"),
-    optgroup.option("--silent", is_flag=True, default=False, help="If submission file exists, exit without prompt"),
-    optgroup.option("--overwrite", is_flag=True, default=False, help="Submssion file will be overwritten without prompt"),
-    optgroup.option("--load-last", is_flag=True, default=False, help="Load last model instead of best model"),
+_wav2vec_options = [
+    optgroup.group("Wav2Vec Options"),
 ]
 
 _monobert_options = [
@@ -125,41 +120,6 @@ _monobert_options = [
     optgroup.option("--proj-dropout", type=click.FloatRange(0, 1), default=0.5, help="Dropout for projection layer"),
     optgroup.option("--use-conv", is_flag=True, default=False, help="Use conv layer to aggregate encoder outputs"),
     optgroup.option("--kernel-size", type=click.INT, default=2, help="Kernel size of Conv1d"),
-]
-
-_duobert_options = [
-    optgroup.group("duoBERT Options"),
-    optgroup.option("--test-opt", type=click.INT, default=256, help="test opt"),
-]
-
-
-_sentencebert_options = [
-    optgroup.group("sentenceBERT Options"),
-    optgroup.option("--pretrained-model-name", type=click.STRING, default="monologg/koelectra-base-v3-discriminator", help="Bert pretrained model name"),
-    optgroup.option("--n-feature-layers", type=click.INT, default=1, help="# of layers to be concatenated for outputs"),
-    optgroup.option("--proj-dropout", type=click.FloatRange(0, 1), default=0.5, help="Dropout for projection layer"),
-    optgroup.option("--margin", type=click.FLOAT, default=0.15, help="Margin for circle loss"),
-    optgroup.option("--gamma", type=click.FloatRange(0, 1, min_open=True), default=1.0, help="Scale factor for circle loss"),
-    optgroup.option("--metric", type=click.Choice(["cosine", "euclidean"]), default="cosine", help="Metric for circle loss"),
-]
-
-_colbert_options = [
-    optgroup.group("colBERT Options"),
-    optgroup.option("--pretrained-model-name", type=click.STRING, default="monologg/koelectra-base-v3-discriminator", help="Bert pretrained model name"),
-    optgroup.option("--n-feature-layers", type=click.INT, default=1, help="# of layers to be concatenated for outputs"),
-    optgroup.option("--proj-dropout", type=click.FloatRange(0, 1), default=0.5, help="Dropout for projection layer"),
-    optgroup.option("--margin", type=click.FLOAT, default=0.15, help="Margin for circle loss"),
-    optgroup.option("--gamma", type=click.FloatRange(0, 1, min_open=True), default=1.0, help="Scale factor for circle loss"),
-    optgroup.option("--metric", type=click.Choice(["cosine", "euclidean"]), default="cosine", help="Metric for circle loss"),
-    optgroup.option("--use-transformer-late-interaction", is_flag=True, default=False, help="Use transformer late interaction"),
-    optgroup.option("--linear-size", type=click.INT, multiple=True, default=[128], help="linear size for transformer late interaction"),
-    optgroup.option('--linear-dropout', type=click.FloatRange(0, 1), default=0.2, help="Dropout for MLP of transformer late interaction"),
-    optgroup.option('--dropout', type=click.FloatRange(0, 1), default=0.1, help="Dropout for transformer late interaction"),
-    optgroup.option("--use-layernorm", is_flag=True, default=False, help="Use layernorm in MLP of transformer late interaction"),
-    optgroup.option("--dim-feedforward", type=click.INT, default=1024, help="Feedforward dimension of transformer late interaction"),
-    optgroup.option("--n-layers", type=click.INT, default=4, help="# of layers of transformer late interaction"),
-    optgroup.option("--n-heads", type=click.INT, default=4, help="# of heads of transformer late interaction"),
-    optgroup.option("--loss-type", type=click.Choice(['circle', 'bce']), default='circle', help="Type of loss function"),
 ]
 
 # fmt: on
@@ -178,68 +138,15 @@ def add_options(options):
 @add_options(_train_options)
 @add_options(_log_options)
 @add_options(_dataset_options)
-@add_options(_submission_options)
-@add_options(_monobert_options)
+@add_options(_wav2vec_options)
 @click.pass_context
-def train_monobert(ctx: click.core.Context, **args: Any) -> None:
-    """Train monoBERT"""
+def train_wav2vec(ctx: click.core.Context, **args: Any) -> None:
+    """Train Wav2Vec"""
     if ctx.obj["save_args"] is not None:
         save_args(args, ctx.obj["save_args"])
         return
-    args["linear_size"] = list(args["linear_size"])
-    args["shard_idx"] = list(args["shard_idx"])
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    train_model("monoBERT", **args)
-
-
-@cli.command(context_settings={"show_default": True})
-@add_options(_train_options)
-@add_options(_log_options)
-@add_options(_dataset_options)
-@add_options(_duobert_options)
-@click.pass_context
-def train_duobert(ctx: click.core.Context, **args: Any) -> None:
-    """Train duoBERT"""
-    if ctx.obj["save_args"] is not None:
-        save_args(args, ctx.obj["save_args"])
-        return
-    args["shard_idx"] = list(args["shard_idx"])
-    train_model("duoBERT", **args)
-
-
-@cli.command(context_settings={"show_default": True})
-@add_options(_train_options)
-@add_options(_log_options)
-@add_options(_dataset_options)
-@add_options(_submission_options)
-@add_options(_sentencebert_options)
-@click.pass_context
-def train_sentencebert(ctx: click.core.Context, **args: Any) -> None:
-    """Train sentenceBERT"""
-    if ctx.obj["save_args"] is not None:
-        save_args(args, ctx.obj["save_args"])
-        return
-    args["shard_idx"] = list(args["shard_idx"])
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    train_model("sentenceBERT", **args)
-
-
-@cli.command(context_settings={"show_default": True})
-@add_options(_train_options)
-@add_options(_log_options)
-@add_options(_dataset_options)
-@add_options(_submission_options)
-@add_options(_colbert_options)
-@click.pass_context
-def train_colbert(ctx: click.core.Context, **args: Any) -> None:
-    """Train ColBERT"""
-    if ctx.obj["save_args"] is not None:
-        save_args(args, ctx.obj["save_args"])
-        return
-    args["linear_size"] = list(args["linear_size"])
-    args["shard_idx"] = list(args["shard_idx"])
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    train_model("colBERT", **args)
+    train_model("Wav2Vec", **args)
 
 
 @log_elapsed_time
@@ -250,15 +157,9 @@ def train_model(
     enable_trial_pruning: bool = False,
     **args: Any,
 ) -> None:
-    assert train_name in ["monoBERT", "duoBERT", "sentenceBERT", "colBERT"]
-    if train_name == "monoBERT":
-        import src.monobert.trainer as trainer
-    elif train_name == "duoBERT":
-        import src.duobert.trainer as trainer
-    elif train_name == "sentenceBERT":
-        import src.sentencebert.trainer as trainer
-    elif train_name == "colBERT":
-        import src.colbert.trainer as trainer
+    assert train_name in ["Wav2Vec"]
+    if train_name == "Wav2Vec":
+        import src.wav2vec.trainer as trainer
 
     args = AttrDict(args)
 

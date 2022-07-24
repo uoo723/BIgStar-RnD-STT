@@ -169,7 +169,7 @@ class BaseTrainerModel(pl.LightningModule, ABC):
         valid_size: float = 0.2,
         early: int = 10,
         reset_early: bool = False,
-        early_criterion: str = "n5",
+        early_criterion: str = "wer",
         eval_step: int = 100,
         optim_name: str = "adamw",
         lr: float = 1e-3,
@@ -398,7 +398,8 @@ def train(
     monitor = (
         "loss/val" if args.early_criterion == "loss" else f"val/{args.early_criterion}"
     )
-    mode = "min" if args.early_criterion == "loss" else "max"
+
+    mode = "min" if args.early_criterion in ['loss', 'wer', 'cer'] else "max"
 
     callbacks = []
     callbacks.append(EarlyStopping(monitor=monitor, patience=args.early, mode=mode))
