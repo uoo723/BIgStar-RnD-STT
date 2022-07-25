@@ -64,7 +64,7 @@ _train_options = [
     optgroup.option("--model-cnf", type=click.Path(exists=True), help="Model config file path"),
     optgroup.option("--data-cnf", type=click.Path(exists=True), help="Data config file path"),
     optgroup.option("--optim-name", type=click.Choice(["adamw", "sgd"]), default="adamw", help="Choose optimizer"),
-    optgroup.option("--scheduler-warmup", type=click.FloatRange(0, 1), help="Ratio of warmup among total training steps"),
+    optgroup.option("--scheduler-warmup", type=FLOAT_INT, help="Ratio of warmup among total training steps"),
     optgroup.option(
         "--scheduler-type",
         type=click.Choice(

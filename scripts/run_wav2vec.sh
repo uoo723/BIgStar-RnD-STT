@@ -11,15 +11,17 @@ args=(
     --dataset-name $DATASET
     --run-script $0
     --optim-name "adamw"
-    --lr 2.5e-5
-    --num-epochs 2
+    --lr 2.5e-4
+    --num-epochs 30
     --train-batch-size 2
-    --test-batch-size 8
-    --accumulation-step 8
+    --test-batch-size 4
+    --accumulation-step 4
+    --scheduler-type "linear"
+    --scheduler-warmup 500
     --early-criterion 'cer'
     --seed $1
     --swa-warmup 1
-    --eval-step 3000
+    --eval-step 5000
     --early 50
     --mp-enabled
     --gradient-max-norm 5.0

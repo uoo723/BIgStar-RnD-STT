@@ -6,7 +6,7 @@ import os
 from abc import ABC, abstractmethod, abstractproperty
 from ast import literal_eval
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Type
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, Union
 
 import optuna
 import pytorch_lightning as pl
@@ -117,18 +117,29 @@ def _get_scheduler(
     batch_size: int,
     accumulation_step: int = 1,
     scheduler_type: Optional[str] = None,
-    scheduler_warmup: Optional[float] = None,
+    scheduler_warmup: Optional[Union[float, int]] = None,
 ) -> Optional[_LRScheduler]:
     if scheduler_type is None:
         return
 
     step_size = batch_size * accumulation_step
     num_training_steps = (train_size + step_size - 1) // step_size * num_epochs
-    num_warmup_steps = (
-        int(scheduler_warmup * num_training_steps)
-        if scheduler_warmup is not None
-        else None
-    )
+
+    if scheduler_warmup is not None:
+        if isinstance(scheduler_warmup, float):
+            if not 0 <= scheduler_warmup <= 1:
+                raise ValueError(f"scheduler_warmup must be 0 <= scheduler_warmup <= 1")
+            num_warmup_steps = int(scheduler_warmup * num_training_steps)
+        elif isinstance(scheduler_warmup, int):
+            if scheduler_warmup > num_training_steps:
+                raise ValueError(
+                    f"scheduler_warmup must be less than num_training_steps"
+                )
+            num_warmup_steps = scheduler_warmup
+        else:
+            raise ValueError(f"num_warmup_steps must be float|int")
+    else:
+        num_warmup_steps = None
 
     return get_scheduler(
         scheduler_type,
@@ -399,7 +410,7 @@ def train(
         "loss/val" if args.early_criterion == "loss" else f"val/{args.early_criterion}"
     )
 
-    mode = "min" if args.early_criterion in ['loss', 'wer', 'cer'] else "max"
+    mode = "min" if args.early_criterion in ["loss", "wer", "cer"] else "max"
 
     callbacks = []
     callbacks.append(EarlyStopping(monitor=monitor, patience=args.early, mode=mode))
