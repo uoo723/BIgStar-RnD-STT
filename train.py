@@ -109,6 +109,10 @@ _dataset_options = [
 _wav2vec_options = [
     optgroup.group("Wav2Vec Options"),
     optgroup.option("--pretrained-model-name", type=click.STRING, default="kresnik/wav2vec2-large-xlsr-korean", help="Pretrained model name"),
+    optgroup.option("--num-hidden-layers", type=click.INT, default=12, help="# of hidden layers in the Transformer"),
+    optgroup.option("--num-attention-heads", type=click.INT, default=12, help="# of attention heads in the Transformer"),
+    optgroup.option("--intermediate-size", type=click.INT, default=3072, help="Dimensionality of the intermediate layer in the Transformer"),
+    optgroup.option("--hidden-size", type=click.INT, default=768, help="Dimensionality of the encoder layers and the pooler layer in the Transformer"),
 ]
 
 _monobert_options = [

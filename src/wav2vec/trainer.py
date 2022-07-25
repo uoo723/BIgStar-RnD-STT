@@ -39,18 +39,32 @@ BATCH = Tuple[Dict[str, torch.Tensor], torch.Tensor]
 
 
 class Wav2VecTrainerModel(BaseTrainerModel):
-    MODEL_HPARAMS: Iterable[str] = ["pretrained_model_name"]
+    MODEL_HPARAMS: Iterable[str] = [
+        "pretrained_model_name",
+        "num_hidden_layers",
+        "num_attention_heads",
+        "intermediate_size",
+        "hidden_size",
+    ]
 
     def __init__(
         self,
         pretrained_model_name: str = "kresnik/wav2vec2-large-xlsr-korean",
         dataset_filepath: str = "./data/kspon_speech/preprocessed/transcripts.csv",
+        num_hidden_layers: int = 12,
+        num_attention_heads: int = 12,
+        intermediate_size: int = 3072,
+        hidden_size: int = 768,
         *args: Any,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.pretrained_model_name = pretrained_model_name
         self.dataset_filepath = dataset_filepath
+        self.num_hidden_layers = num_hidden_layers
+        self.num_attention_heads = num_attention_heads
+        self.intermediate_size = intermediate_size
+        self.hidden_size = hidden_size
         self.save_hyperparameters(ignore=self.IGNORE_HPARAMS)
 
     @property
@@ -120,6 +134,7 @@ class Wav2VecTrainerModel(BaseTrainerModel):
                 pad_token_id=self.processor.tokenizer.pad_token_id,
                 ctc_loss_reduction="mean",
                 ctc_zero_infinity=True,
+                **filter_arguments(hparams, Wav2Vec2Config),
             )
         )
         # self.loss_fn = nn.CTCLoss(blank=self.processor.tokenizer.pad_token_id)
