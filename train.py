@@ -50,7 +50,7 @@ _train_options = [
     optgroup.option("--mp-enabled", is_flag=True, default=False, help="Enable Mixed Precision"),
     optgroup.option("--early", type=click.INT, default=10, help="Early stopping step"),
     optgroup.option("--reset-early", is_flag=True, default=False, help="Reset early"),
-    optgroup.option("--early-criterion", type=click.Choice(["mrr", "loss"]), default="mrr", help="Early stopping criterion"),
+    optgroup.option("--early-criterion", type=click.Choice(["cer", "wer", "loss"]), default="mrr", help="Early stopping criterion"),
     optgroup.option("--eval-step", type=click.INT, default=100, help="Evaluation step during training"),
     optgroup.option("--num-epochs", type=click.INT, default=40, help="Total number of epochs"),
     optgroup.option("--train-batch-size", type=click.INT, default=8, help="Batch size for training"),
@@ -108,6 +108,7 @@ _dataset_options = [
 
 _wav2vec_options = [
     optgroup.group("Wav2Vec Options"),
+    optgroup.option("--pretrained-model-name", type=click.STRING, default="kresnik/wav2vec2-large-xlsr-korean", help="Pretrained model name"),
 ]
 
 _monobert_options = [

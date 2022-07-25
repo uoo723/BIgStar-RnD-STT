@@ -27,18 +27,13 @@ from pytorch_lightning.utilities.types import (
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Subset
 from tqdm.auto import tqdm
-from transformers import (
-    AutoProcessor,
-    Wav2Vec2Config,
-    Wav2Vec2ForCTC,
-)
+from transformers import AutoProcessor, Wav2Vec2Config, Wav2Vec2ForCTC
+from transformers.modeling_outputs import CausalLMOutput
 
 from .. import base_trainer
 from ..base_trainer import BaseTrainerModel, get_ckpt_path, load_model_hparams
 from ..datasets.kspon.datasets import KSponSpeechDataset, dataloader_collate_fn
 from ..utils import AttrDict, copy_file, filter_arguments, get_num_batches
-
-# from transformers.models.wav2vec2.modeling_wav2vec2 import
 
 BATCH = Tuple[Dict[str, torch.Tensor], torch.Tensor]
 
@@ -120,74 +115,89 @@ class Wav2VecTrainerModel(BaseTrainerModel):
 
         self.processor = AutoProcessor.from_pretrained(self.pretrained_model_name)
         self.model = Wav2Vec2ForCTC(
-            Wav2Vec2Config(vocab_size=self.processor.tokenizer.vocab_size)
+            Wav2Vec2Config(
+                vocab_size=self.processor.tokenizer.vocab_size,
+                pad_token_id=self.processor.tokenizer.pad_token_id,
+                ctc_loss_reduction="mean",
+                ctc_zero_infinity=True,
+            )
         )
-        self.loss_fn = nn.CTCLoss(self.processor.tokenizer)
-
+        # self.loss_fn = nn.CTCLoss(blank=self.processor.tokenizer.pad_token_id)
 
     def training_step(self, batch: BATCH, _) -> STEP_OUTPUT:
-        batch_x, batch_y = batch
-        outputs = self.model(batch_x)
-        loss = self.loss_fn(outputs, batch_y)
-        self.log("loss/train", loss)
-        return loss
+        batch_signal, batch_transcript = batch
+        batch_size = len(batch_signal["input_values"])
+
+        inputs = filter_arguments(batch_signal, self.model.forward)
+        outputs: CausalLMOutput = self.model(
+            **inputs, labels=batch_transcript["input_ids"]
+        )
+
+        # signal_lengths = torch.full(
+        #     size=(batch_size,), fill_value=logits.shape[1], dtype=torch.long
+        # ).to(self.device)
+
+        # loss = self.loss_fn(
+        #     logits.log_softmax(dim=-1).transpose(0, 1),
+        #     batch_transcript["input_ids"],
+        #     signal_lengths,
+        #     # batch_transcript["lengths"],
+        # )
+
+        self.log("loss/train", outputs.loss)
+        return outputs.loss
 
     def _validation_and_test_step(
         self, batch: BATCH, is_val: bool = True
     ) -> Optional[STEP_OUTPUT]:
-        batch_x, batch_y = batch
-        outputs = self.model(batch_x)
-        scores, indices = torch.topk(outputs, k=self.final_topk)
-        scores = scores.sigmoid().float().cpu()
-        indices = indices.cpu()
+        batch_signal, batch_transcript = batch
+
+        inputs = filter_arguments(batch_signal, self.model.forward)
+        outputs: CausalLMOutput = self.model(
+            **inputs, labels=batch_transcript["input_ids"]
+        )
+        pred_ids = outputs.logits.argmax(dim=-1)
+        pred = self.processor.batch_decode(pred_ids)
+
+        # logger.debug("pred_ids:")
+        # print(pred_ids)
 
         if is_val:
-            loss = self.loss_fn(outputs, batch_y)
-            self.log("loss/val", loss)
+            # batch_size = len(batch_signal["input_values"])
+            # signal_lengths = torch.full(
+            #     size=(batch_size,), fill_value=logits.shape[1], dtype=torch.long
+            # ).to(self.device)
+            # loss = self.loss_fn(
+            #     logits.log_softmax(dim=-1).transpose(0, 1),
+            #     batch_transcript["input_ids"],
+            #     signal_lengths,
+            #     # batch_transcript["lengths"],
+            # )
+            self.log("loss/val", outputs.loss)
 
-        return scores, indices
+        return pred
 
     def _validation_and_test_epoch_end(
         self, outputs: EPOCH_OUTPUT, is_val: bool = True
     ) -> None:
-        _, indices = zip(*outputs)
-        indices = np.stack(indices)
+        predictions = [p2 for p1 in outputs for p2 in p1]
+        gt = self.val_dataset.dataset.df.iloc[self.valid_ids][: len(predictions)][
+            "transcript"
+        ].tolist()
 
-        prediction = {}
-        for query_id, rank_indices in zip(
-            self.sub_train_query_ids[self.valid_ids][: len(indices)], indices
-        ):
-            prediction[query_id] = [
-                self.candidates[query_id][: self.topk_candidates][idx]
-                for idx in rank_indices
-            ]
-
-        val_y_true = {
-            k: self.train_query_to_docs[k]
-            for k in self.sub_train_query_ids[self.valid_ids][: len(indices)]
-        }
-
-        mrr = get_mrr(val_y_true, prediction)
+        cer = compute_cer(gt, predictions)
+        wer = compute_wer(gt, predictions)
 
         if is_val:
-            self.log_dict({"val/mrr": mrr}, prog_bar=True)
+            self.log_dict({"val/cer": cer, "val/wer": wer}, prog_bar=True)
         else:
-            self.log_dict({"test/mrr": mrr})
+            self.log_dict({"test/cer": cer, "test/wer": wer})
 
     def validation_step(self, batch: BATCH, _) -> Optional[STEP_OUTPUT]:
         return self._validation_and_test_step(batch, is_val=True)
 
     def test_step(self, batch: BATCH, _) -> Optional[STEP_OUTPUT]:
         return self._validation_and_test_step(batch, is_val=False)
-
-    def on_train_epoch_start(self) -> None:
-        self._set_dataset_mode(self.train_dataset, is_training=True)
-
-    def on_validation_epoch_start(self) -> None:
-        self._set_dataset_mode(self.val_dataset, is_training=False)
-
-    def on_test_epoch_start(self) -> None:
-        self._set_dataset_mode(self.test_dataset, is_training=False)
 
     def validation_epoch_end(self, outputs: EPOCH_OUTPUT) -> None:
         self._validation_and_test_epoch_end(outputs, is_val=True)
@@ -197,8 +207,8 @@ class Wav2VecTrainerModel(BaseTrainerModel):
 
 
 def check_args(args: AttrDict) -> None:
-    valid_early_criterion = ["mrr"]
-    valid_model_name = ["monoBERT"]
+    valid_early_criterion = ["cer", "wer", "loss"]
+    valid_model_name = ["Wav2Vec"]
     valid_dataset_name = ["dataset"]
     base_trainer.check_args(
         args, valid_early_criterion, valid_model_name, valid_dataset_name
@@ -230,7 +240,7 @@ def test(
     return base_trainer.test(
         args,
         Wav2VecTrainerModel,
-        metrics=["mrr"],
+        metrics=["cer", "wer"],
         trainer=trainer,
         is_hptuning=is_hptuning,
     )

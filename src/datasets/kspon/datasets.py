@@ -47,7 +47,6 @@ def dataloader_collate_fn(
     sampling_rate: int = 16_000,
 ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, Dict[str, torch.Tensor]]:
     signals = [b[0] for b in batch]
-    lengths = [b[1] for b in batch]
     transcripts = [b[2] for b in batch]
 
     signal = processor(
