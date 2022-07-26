@@ -113,6 +113,8 @@ _wav2vec_options = [
     optgroup.option("--num-attention-heads", type=click.INT, default=12, help="# of attention heads in the Transformer"),
     optgroup.option("--intermediate-size", type=click.INT, default=3072, help="Dimensionality of the intermediate layer in the Transformer"),
     optgroup.option("--hidden-size", type=click.INT, default=768, help="Dimensionality of the encoder layers and the pooler layer in the Transformer"),
+    optgroup.option("--ctc-loss-reduction", type=click.Choice(["mean", "sum"]), default="sum", help="Specifies the reduction to apply to the output of `torch.nn.CTCLoss`"),
+    optgroup.option("--ctc-zero-infinity", is_flag=True, default=False, help="Whether to zero infinite losses and the associated gradients of `torch.nn.CTCLoss`"),
 ]
 
 _monobert_options = [

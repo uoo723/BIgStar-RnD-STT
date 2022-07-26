@@ -45,6 +45,8 @@ class Wav2VecTrainerModel(BaseTrainerModel):
         "num_attention_heads",
         "intermediate_size",
         "hidden_size",
+        "ctc_loss_reduction",
+        "ctc_zero_infinity",
     ]
 
     def __init__(
@@ -55,6 +57,8 @@ class Wav2VecTrainerModel(BaseTrainerModel):
         num_attention_heads: int = 12,
         intermediate_size: int = 3072,
         hidden_size: int = 768,
+        ctc_loss_reduction: str = "sum",
+        ctc_zero_infinity: bool = False,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -65,6 +69,8 @@ class Wav2VecTrainerModel(BaseTrainerModel):
         self.num_attention_heads = num_attention_heads
         self.intermediate_size = intermediate_size
         self.hidden_size = hidden_size
+        self.ctc_loss_reduction = ctc_loss_reduction
+        self.ctc_zero_infinity = ctc_zero_infinity
         self.save_hyperparameters(ignore=self.IGNORE_HPARAMS)
 
     @property
@@ -132,8 +138,6 @@ class Wav2VecTrainerModel(BaseTrainerModel):
             Wav2Vec2Config(
                 vocab_size=self.processor.tokenizer.vocab_size,
                 pad_token_id=self.processor.tokenizer.pad_token_id,
-                ctc_loss_reduction="mean",
-                ctc_zero_infinity=True,
                 **filter_arguments(hparams, Wav2Vec2Config),
             )
         )
