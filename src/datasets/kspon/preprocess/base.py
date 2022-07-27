@@ -97,12 +97,15 @@ def preprocess_data(dataset_path, mode="phonetic"):
         "581483": "퍼센트",
     }
 
-    for folder in os.listdir(dataset_path):
+    folder_paths = [
+        folder_path
+        for folder_path in os.listdir(dataset_path)
+        if folder_path.startswith("KsponSpeech") and os.path.isdir(folder_path)
+    ]
+
+    for folder in tqdm(folder_paths):
         # folder : {KsponSpeech_01, ..., KsponSpeech_05}
         folder_path = os.path.join(dataset_path, folder)
-        if not folder.startswith("KsponSpeech") or not os.path.isdir(folder_path):
-            continue
-
         for subfolder in tqdm(os.listdir(folder_path), leave=False):
             subfolder_path = os.path.join(dataset_path, folder, subfolder)
 
