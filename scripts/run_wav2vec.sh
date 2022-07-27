@@ -14,13 +14,14 @@ args=(
     --num-hidden-layers 6
     --num-attention-heads 4
     --intermediate-size 1024
-    --lr 2.5e-4
+    --lr 2.5e-5
+    --ctc-zero-infinity
     --num-epochs 30
-    --train-batch-size 2
+    --train-batch-size 4
     --test-batch-size 4
     --accumulation-step 2
-    --scheduler-type "linear"
-    --scheduler-warmup 500
+    # --scheduler-type "linear"
+    # --scheduler-warmup 500
     --early-criterion 'cer'
     --seed $1
     --swa-warmup 1
@@ -30,7 +31,7 @@ args=(
     --gradient-max-norm 5.0
     --num-workers 8
     --experiment-name "Wav2Vec"
-    --valid-size 300
+    --valid-size 1000
 )
 
 python main.py train-wav2vec "${args[@]}"
