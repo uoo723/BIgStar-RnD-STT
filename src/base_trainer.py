@@ -278,10 +278,16 @@ class BaseTrainerModel(pl.LightningModule, ABC):
         if not self._logged:
             logger.info(f"Model: {self.model_name}")
             logger.info(f"Dataset: {self.dataset_name}")
-            logger.info(f"# train dataset: {len(self.train_dataset):,}")
-            logger.info(f"# valid dataset: {len(self.val_dataset):,}")
-            logger.info(f"# test dataset: {len(self.test_dataset):,}")
-            # logger.info(f"# labels: {len(self.train_dataset.dataset.mlb.classes_):,}")
+
+            if self.train_dataset:
+                logger.info(f"# train dataset: {len(self.train_dataset):,}")
+
+            if self.val_dataset:
+                logger.info(f"# valid dataset: {len(self.val_dataset):,}")
+
+            if self.test_dataset:
+                logger.info(f"# test dataset: {len(self.test_dataset):,}")
+
             self._logged = True
 
     def configure_optimizers(self):

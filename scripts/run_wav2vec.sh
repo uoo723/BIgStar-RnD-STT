@@ -26,12 +26,13 @@ args=(
     --seed $1
     --swa-warmup 1
     --eval-step 5000
-    --early 50
+    --early 100
     --mp-enabled
     --gradient-max-norm 5.0
     --num-workers 8
     --experiment-name "Wav2Vec"
     --valid-size 1000
+    --skip-test
 )
 
 python main.py train-wav2vec "${args[@]}"

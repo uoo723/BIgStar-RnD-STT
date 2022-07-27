@@ -50,7 +50,7 @@ _train_options = [
     optgroup.option("--mp-enabled", is_flag=True, default=False, help="Enable Mixed Precision"),
     optgroup.option("--early", type=click.INT, default=10, help="Early stopping step"),
     optgroup.option("--reset-early", is_flag=True, default=False, help="Reset early"),
-    optgroup.option("--early-criterion", type=click.Choice(["cer", "wer", "loss"]), default="mrr", help="Early stopping criterion"),
+    optgroup.option("--early-criterion", type=click.Choice(["cer", "wer", "loss"]), default="cer", help="Early stopping criterion"),
     optgroup.option("--eval-step", type=click.INT, default=100, help="Evaluation step during training"),
     optgroup.option("--num-epochs", type=click.INT, default=40, help="Total number of epochs"),
     optgroup.option("--train-batch-size", type=click.INT, default=8, help="Batch size for training"),
@@ -94,16 +94,8 @@ _log_options = [
 
 _dataset_options = [
     optgroup.group("Dataset Options"),
-    optgroup.option("--data-dir", type=click.Path(exists=True), default="./data", help="Data root directory"),
-    optgroup.option("--max-length", type=click.INT, default=512, help="Maximum length of tokens"),
-    optgroup.option("--query-max-length", type=click.INT, default=60, help="Maximum length of query tokens"),
-    optgroup.option("--passage-max-length", type=click.INT, default=512, help="Maximum length of passage tokens"),
-    optgroup.option("--shard-idx", type=click.INT, multiple=True, help="Select shard idx"),
-    optgroup.option("--shard-size", type=click.INT, default=10000, help="Size of shard"),
-    optgroup.option("--topk-candidates", type=click.INT, default=50, help="Topk candidates"),
-    optgroup.option("--final-topk", type=click.INT, default=10, help="Final topk predction"),
-    optgroup.option("--num-neg", type=click.INT, default=1, help="# of negative samples"),
-    optgroup.option("--num-pos", type=click.INT, default=1, help="# of positive samples"),
+    optgroup.option("--dataset-filepath", type=click.Path(exists=True), default="./data/kspon_speech/preprocessed/transcripts.csv", help="Preprocessed data filepath"),
+    optgroup.option("--cache-dir", type=click.Path(), default="./data/huggingface/datasets", help="Cache directory for huggingface datasets"),
 ]
 
 _wav2vec_options = [
@@ -115,18 +107,6 @@ _wav2vec_options = [
     optgroup.option("--hidden-size", type=click.INT, default=768, help="Dimensionality of the encoder layers and the pooler layer in the Transformer"),
     optgroup.option("--ctc-loss-reduction", type=click.Choice(["mean", "sum"]), default="sum", help="Specifies the reduction to apply to the output of `torch.nn.CTCLoss`"),
     optgroup.option("--ctc-zero-infinity", is_flag=True, default=False, help="Whether to zero infinite losses and the associated gradients of `torch.nn.CTCLoss`"),
-]
-
-_monobert_options = [
-    optgroup.group("monoBERT Options"),
-    optgroup.option("--pretrained-model-name", type=click.STRING, default="monologg/koelectra-base-v3-discriminator", help="Bert pretrained model name"),
-    optgroup.option('--linear-size', type=click.INT, multiple=True, default=[256], help="Linear size"),
-    optgroup.option('--dropout', type=click.FloatRange(0, 1), default=0.2, help="Dropout for MLP"),
-    optgroup.option("--use-layernorm", is_flag=True, default=False, help="Use layernorm in MLP"),
-    optgroup.option("--n-feature-layers", type=click.INT, default=1, help="# of layers to be concatenated for outputs"),
-    optgroup.option("--proj-dropout", type=click.FloatRange(0, 1), default=0.5, help="Dropout for projection layer"),
-    optgroup.option("--use-conv", is_flag=True, default=False, help="Use conv layer to aggregate encoder outputs"),
-    optgroup.option("--kernel-size", type=click.INT, default=2, help="Kernel size of Conv1d"),
 ]
 
 # fmt: on

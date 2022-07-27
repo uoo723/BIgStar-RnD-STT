@@ -2,21 +2,14 @@
 Created on 2022/06/07
 @author Sangwoo Han
 """
-import os
-from collections import OrderedDict
 from functools import partial
-from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, Optional, Tuple
 
-import click
 import numpy as np
-import pandas as pd
 import pytorch_lightning as pl
 import torch
-import torch.nn as nn
 from jiwer import cer as compute_cer
 from jiwer import wer as compute_wer
-from logzero import logger
 from optuna import Trial
 from pytorch_lightning.utilities.types import (
     EPOCH_OUTPUT,
@@ -26,14 +19,15 @@ from pytorch_lightning.utilities.types import (
 )
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Subset
-from tqdm.auto import tqdm
 from transformers import AutoProcessor, Wav2Vec2Config, Wav2Vec2ForCTC
 from transformers.modeling_outputs import CausalLMOutput
 
 from .. import base_trainer
-from ..base_trainer import BaseTrainerModel, get_ckpt_path, load_model_hparams
+from ..base_trainer import BaseTrainerModel, load_model_hparams
 from ..dataset.kspon import KSponSpeechDataset, dataloader_collate_fn
-from ..utils import AttrDict, copy_file, filter_arguments, get_num_batches
+from ..dataset.zeroth_korean import ZerothKoreanDataset
+from ..utils import AttrDict, filter_arguments
+from mlflow.tracking import MlflowClient
 
 BATCH = Tuple[Dict[str, torch.Tensor], torch.Tensor]
 
@@ -53,6 +47,7 @@ class Wav2VecTrainerModel(BaseTrainerModel):
         self,
         pretrained_model_name: str = "kresnik/wav2vec2-large-xlsr-korean",
         dataset_filepath: str = "./data/kspon_speech/preprocessed/transcripts.csv",
+        cache_dir: str = "./data/huggingface/datasets",
         num_hidden_layers: int = 12,
         num_attention_heads: int = 12,
         intermediate_size: int = 3072,
@@ -65,6 +60,7 @@ class Wav2VecTrainerModel(BaseTrainerModel):
         super().__init__(*args, **kwargs)
         self.pretrained_model_name = pretrained_model_name
         self.dataset_filepath = dataset_filepath
+        self.cache_dir = cache_dir
         self.num_hidden_layers = num_hidden_layers
         self.num_attention_heads = num_attention_heads
         self.intermediate_size = intermediate_size
@@ -78,13 +74,13 @@ class Wav2VecTrainerModel(BaseTrainerModel):
         return Wav2VecTrainerModel.MODEL_HPARAMS
 
     def prepare_data(self) -> None:
-        pass
+        ZerothKoreanDataset(cache_dir=self.cache_dir)
 
     def setup_dataset(self, stage: Optional[str] = None) -> None:
         if stage == "predict":
             raise ValueError(f"{stage} stage is not supported")
 
-        if self.train_dataset is None:
+        if stage == "fit" and self.train_dataset is None:
             dataset = KSponSpeechDataset(self.dataset_filepath)
 
             self.train_ids, self.valid_ids = train_test_split(
@@ -96,8 +92,8 @@ class Wav2VecTrainerModel(BaseTrainerModel):
             self.train_dataset = Subset(dataset, self.train_ids)
             self.val_dataset = Subset(dataset, self.valid_ids)
 
-        if self.test_dataset is None:
-            self.test_dataset = self.val_dataset
+        if stage == "test" and self.test_dataset is None:
+            self.test_dataset = ZerothKoreanDataset(cache_dir=self.cache_dir)
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
         return DataLoader(
@@ -141,27 +137,14 @@ class Wav2VecTrainerModel(BaseTrainerModel):
                 **filter_arguments(hparams, Wav2Vec2Config),
             )
         )
-        # self.loss_fn = nn.CTCLoss(blank=self.processor.tokenizer.pad_token_id)
 
     def training_step(self, batch: BATCH, _) -> STEP_OUTPUT:
         batch_signal, batch_transcript = batch
-        batch_size = len(batch_signal["input_values"])
 
         inputs = filter_arguments(batch_signal, self.model.forward)
         outputs: CausalLMOutput = self.model(
             **inputs, labels=batch_transcript["input_ids"]
         )
-
-        # signal_lengths = torch.full(
-        #     size=(batch_size,), fill_value=logits.shape[1], dtype=torch.long
-        # ).to(self.device)
-
-        # loss = self.loss_fn(
-        #     logits.log_softmax(dim=-1).transpose(0, 1),
-        #     batch_transcript["input_ids"],
-        #     signal_lengths,
-        #     # batch_transcript["lengths"],
-        # )
 
         self.log("loss/train", outputs.loss)
         return outputs.loss
@@ -178,20 +161,7 @@ class Wav2VecTrainerModel(BaseTrainerModel):
         pred_ids = outputs.logits.argmax(dim=-1)
         pred = self.processor.batch_decode(pred_ids)
 
-        # logger.debug("pred_ids:")
-        # print(pred_ids)
-
         if is_val:
-            # batch_size = len(batch_signal["input_values"])
-            # signal_lengths = torch.full(
-            #     size=(batch_size,), fill_value=logits.shape[1], dtype=torch.long
-            # ).to(self.device)
-            # loss = self.loss_fn(
-            #     logits.log_softmax(dim=-1).transpose(0, 1),
-            #     batch_transcript["input_ids"],
-            #     signal_lengths,
-            #     # batch_transcript["lengths"],
-            # )
             self.log("loss/val", outputs.loss)
 
         return pred
@@ -200,9 +170,12 @@ class Wav2VecTrainerModel(BaseTrainerModel):
         self, outputs: EPOCH_OUTPUT, is_val: bool = True
     ) -> None:
         predictions = [p2 for p1 in outputs for p2 in p1]
-        gt = self.val_dataset.dataset.df.iloc[self.valid_ids][: len(predictions)][
-            "transcript"
-        ].tolist()
+        if is_val:
+            gt = self.val_dataset.dataset.df.iloc[self.valid_ids][: len(predictions)][
+                "transcript"
+            ].tolist()
+        else:
+            gt = self.test_dataset.dataset["text"][: len(predictions)]
 
         cer = compute_cer(gt, predictions)
         wer = compute_wer(gt, predictions)
@@ -266,147 +239,92 @@ def test(
 
 
 def predict(args: AttrDict) -> Any:
-    assert args.mode == "predict", "mode must be predict"
-    assert args.run_id is not None, "run_id must be specified"
-    assert args.submission_output is not None, "submission output must be specified"
+    pass
 
-    logger.info(f"run_id: {args.run_id}")
-    logger.info(f"submission_output: {args.submission_output}")
 
-    if args.topk_filepath:
-        logger.info(f"topk_filepath: {args.topk_filepath}")
+# def test_bak(
+#     args: AttrDict, trainer: Optional[pl.Trainer] = None, is_hptuning: bool = False
+# ) -> Dict[str, float]:
+#     ################################## Load Model ######################################
+#     logger.info("Load model...")
+#     hparams = load_model_hparams(
+#         args.log_dir, args.run_id, Wav2VecTrainerModel.MODEL_HPARAMS
+#     )
+#     processor = AutoProcessor.from_pretrained(args.pretrained_model_name)
+#     model = Wav2Vec2ForCTC(
+#         Wav2Vec2Config(
+#             vocab_size=processor.tokenizer.vocab_size,
+#             pad_token_id=processor.tokenizer.pad_token_id,
+#             **filter_arguments(hparams, Wav2Vec2Config),
+#         )
+#     )
 
-    os.makedirs(os.path.dirname(args.submission_output), exist_ok=True)
+#     ckpt_path = get_ckpt_path(args.log_dir, args.run_id, load_best=True)
+#     ckpt = torch.load(ckpt_path, map_location="cpu")
 
-    if os.path.exists(args.submission_output):
-        if args.silent:
-            return
+#     swa_callback_key = None
+#     callbacks: Dict[str, Any] = ckpt["callbacks"]
+#     for key in callbacks.keys():
+#         if "StochasticWeightAveraging" in key:
+#             swa_callback_key = key
+#             break
 
-        if not args.overwrite:
-            click.confirm(
-                f"{os.path.basename(args.submission_output)} is already existed."
-                " Overwrite it?",
-                abort=True,
-            )
+#     state_dict: Dict[str, torch.Tensor] = ckpt["state_dict"]
 
-    Path(args.submission_output).touch()
+#     if swa_callback_key is not None and "average_model" in callbacks[swa_callback_key]:
+#         logger.info("Use averaged weights")
+#         avg_state_dict: Dict[str, torch.Tensor] = callbacks[swa_callback_key][
+#             "average_model"
+#         ]
+#         avg_state_dict.pop("models_num")
+#         state_dict.update(avg_state_dict)
 
-    ############################# Save runscript #######################################
-    os.makedirs(os.path.dirname(args.submission_output), exist_ok=True)
-    if args.run_script:
-        dirname = os.path.dirname(args.submission_output)
-        basename, ext = os.path.splitext(os.path.basename(args.run_script))
-        basename += "_" + os.path.splitext(os.path.basename(args.submission_output))[0]
-        copy_file(args.run_script, os.path.join(dirname, basename + ext))
-    ####################################################################################
+#     state_dict = OrderedDict(
+#         zip(
+#             [key.replace("model.", "") for key in state_dict.keys()],
+#             state_dict.values(),
+#         )
+#     )
 
-    ################################# Load Data ########################################
-    logger.info("Load Data...")
-    _, test_data, test_question = load_data(args.data_dir)
-    _, test_docs = preprocess_data(test_data, return_query_to_docs=False)
-    test_queries = dict(
-        zip(test_question["question_id"], test_question["question_text"])
-    )
+#     model.load_state_dict(state_dict)
+#     model.to(args.device)
+#     ####################################################################################
 
-    if args.topk_filepath:
-        df = pd.read_csv(args.topk_filepath)
-        test_candidates = dict(
-            zip(df["question_id"], [d.split(",") for d in df["paragraph_id"]])
-        )
-    else:
-        test_query_id_i2s = dict(zip(range(len(test_queries)), test_queries.keys()))
-        tsv_path = os.path.join(args.data_dir, "top1000", "test_top1000_00.txt")
-        df = pd.read_csv(tsv_path, sep=" ", header=None)
-        df[0] = df[0].map(lambda x: test_query_id_i2s[x])
-        test_candidates: Dict[str, List[str]] = df.groupby(0)[2].apply(list).to_dict()
-    ####################################################################################
+#     ################################# Load Dataset #####################################
+#     logger.info("Load dataset...")
+#     dataset = ZerothKoreanDataset(cache_dir=args.cache_dir)
+#     dataloader = DataLoader(
+#         dataset,
+#         batch_size=args.test_batch_size,
+#         num_workers=args.num_workers,
+#         pin_memory=True,
+#         collate_fn=partial(dataloader_collate_fn, processor=processor),
+#     )
+#     ####################################################################################
 
-    ################################## Load Model ######################################
-    logger.info("Load Model...")
-    hparams = load_model_hparams(
-        args.log_dir, args.run_id, Wav2VecTrainerModel.MODEL_HPARAMS
-    )
+#     ##################################### Test #########################################
+#     predictions = []
 
-    model = MonoBERT(**filter_arguments(hparams, MonoBERT))
+#     model.eval()
+#     for batch in tqdm(dataloader, total=len(dataloader)):
+#         batch_signal, _ = batch
+#         inputs = filter_arguments(batch_signal, model.forward)
+#         inputs = {k: v.to(args.device) for k, v in inputs.items()}
 
-    ckpt_path = get_ckpt_path(args.log_dir, args.run_id, load_best=not args.load_last)
-    ckpt = torch.load(ckpt_path, map_location="cpu")
+#         with torch.no_grad():
+#             outputs: CausalLMOutput = model(**inputs)
 
-    swa_callback_key = None
-    callbacks: Dict[str, Any] = ckpt["callbacks"]
-    for key in callbacks.keys():
-        if "StochasticWeightAveraging" in key:
-            swa_callback_key = key
-            break
+#         pred_ids = outputs.logits.argmax(dim=-1)
+#         predictions.extend(processor.batch_decode(pred_ids))
 
-    state_dict: Dict[str, torch.Tensor] = ckpt["state_dict"]
+#     gt = dataset.dataset["text"][: len(predictions)]
 
-    if swa_callback_key is not None and "average_model" in callbacks[swa_callback_key]:
-        logger.info("Use averaged weights")
-        avg_state_dict: Dict[str, torch.Tensor] = callbacks[swa_callback_key][
-            "average_model"
-        ]
-        avg_state_dict.pop("models_num")
-        state_dict.update(avg_state_dict)
+#     cer = compute_cer(gt, predictions)
+#     wer = compute_wer(gt, predictions)
 
-    state_dict = OrderedDict(
-        zip(
-            [key.replace("model.", "") for key in state_dict.keys()],
-            state_dict.values(),
-        )
-    )
+#     results = {"test/cer": cer, "test/wer": wer}
 
-    model.load_state_dict(state_dict)
-    model.to(args.device)
-    tokenizer = AutoTokenizer.from_pretrained(hparams["pretrained_model_name"])
-    ####################################################################################
+#     logger.info(f"results:\ncer: {cer:.4f}\nwer: {wer:.4f}")
+#     ####################################################################################
 
-    ################################## Inference #######################################
-    logger.info("Start Inference")
-    os.environ["TOKENIZERS_PARALLELISM"] = "true"
-
-    batch_size = args.test_batch_size
-    max_length = args.max_length
-    topk = args.topk_candidates
-    answers = []
-
-    model.eval()
-    for q_id, doc_ids in tqdm(test_candidates.items(), desc="inference..."):
-        query_str = test_queries[q_id]
-        doc_ids = np.array(doc_ids)
-        num_batches = get_num_batches(batch_size, topk)
-        predictions = []
-        for b in range(num_batches):
-            doc_str = [
-                test_docs[d_id]
-                for d_id in doc_ids[:topk][b * batch_size : (b + 1) * batch_size]
-            ]
-            inputs: Dict[str, torch.Tensor] = tokenizer(
-                [query_str] * len(doc_str),
-                doc_str,
-                return_tensors="pt",
-                max_length=max_length,
-                padding="max_length",
-                truncation="longest_first",
-            )
-            with torch.no_grad():
-                outputs: torch.Tensor = model(
-                    {k: v.to(args.device) for k, v in inputs.items()}
-                )
-            predictions.append(outputs.cpu())
-        rank = np.concatenate(predictions).argsort()[::-1]
-        answers.append(",".join(doc_ids[:topk][rank][: args.final_topk]))
-
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    ####################################################################################
-
-    ############################### Make Submission ####################################
-    logger.info("Make submission")
-    submission = pd.DataFrame(
-        data={"question_id": test_question["question_id"], "paragraph_id": answers}
-    )
-    submission.to_csv(args.submission_output, index=False)
-    logger.info(f"Saved into {args.submission_output}")
-    ####################################################################################
-
-    return submission
+#     return results
