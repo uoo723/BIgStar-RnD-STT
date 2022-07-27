@@ -32,7 +32,6 @@ args=(
     --num-workers 8
     --experiment-name "Wav2Vec"
     --valid-size 1000
-    --skip-test
 )
 
 python main.py train-wav2vec "${args[@]}"
