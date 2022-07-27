@@ -32,7 +32,7 @@ from transformers.modeling_outputs import CausalLMOutput
 
 from .. import base_trainer
 from ..base_trainer import BaseTrainerModel, get_ckpt_path, load_model_hparams
-from ..datasets.kspon.datasets import KSponSpeechDataset, dataloader_collate_fn
+from ..dataset.kspon import KSponSpeechDataset, dataloader_collate_fn
 from ..utils import AttrDict, copy_file, filter_arguments, get_num_batches
 
 BATCH = Tuple[Dict[str, torch.Tensor], torch.Tensor]

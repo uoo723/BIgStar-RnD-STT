@@ -7,8 +7,8 @@ from typing import Any
 import click
 
 from main import cli
-from src.datasets.kspon.preprocess import preprocess_data
-from src.datasets.kspon.preprocess.character import (
+from src.dataset.kspon.preprocess import preprocess_data
+from src.dataset.kspon.preprocess.character import (
     generate_character_script,
 )
 from src.utils import AttrDict, log_elapsed_time
