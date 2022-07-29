@@ -229,24 +229,14 @@ class StochasticWeightAveraging(Callback):
         if self._average_model:
             swap_swa_params(pl_module, self._average_model, verbose=False)
 
-    def on_save_checkpoint(
-        self,
-        trainer: "pl.Trainer",
-        pl_module: "pl.LightningModule",
-        checkpoint: Dict[str, Any],
-    ) -> Dict[str, Any]:
+    def state_dict(self) -> Dict[str, Any]:
         if self._average_model is not None:
             return {
                 "average_model": self._average_model,
             }
         return {}
 
-    def on_load_checkpoint(
-        self,
-        trainer: "pl.Trainer",
-        pl_module: "pl.LightningModule",
-        callback_state: Dict[str, Any],
-    ) -> None:
+    def load_state_dict(self, callback_state: Dict[str, Any]) -> None:
         if "average_model" in callback_state:
             self._is_transfer_device = False
             self._average_model = callback_state["average_model"]
