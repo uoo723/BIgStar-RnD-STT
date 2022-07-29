@@ -66,6 +66,7 @@ _train_options = [
     optgroup.option("--data-cnf", type=click.Path(exists=True), help="Data config file path"),
     optgroup.option("--optim-name", type=click.Choice(["adamw", "sgd"]), default="adamw", help="Choose optimizer"),
     optgroup.option("--scheduler-warmup", type=FLOAT_INT, help="Ratio of warmup among total training steps"),
+    optgroup.option("--use-deepspeed", is_flag=True, default=False, help="Use deepspeed to reduce gpu memory usage"),
     optgroup.option(
         "--scheduler-type",
         type=click.Choice(
@@ -102,6 +103,7 @@ _dataset_options = [
 _wav2vec_options = [
     optgroup.group("Wav2Vec Options"),
     optgroup.option("--pretrained-model-name", type=click.STRING, default="kresnik/wav2vec2-large-xlsr-korean", help="Pretrained model name"),
+    optgroup.option("--use-pretrained-model", is_flag=True, default=False, help="Use pretrained model"),
     optgroup.option("--num-hidden-layers", type=click.INT, default=12, help="# of hidden layers in the Transformer"),
     optgroup.option("--num-attention-heads", type=click.INT, default=12, help="# of attention heads in the Transformer"),
     optgroup.option("--intermediate-size", type=click.INT, default=3072, help="Dimensionality of the intermediate layer in the Transformer"),

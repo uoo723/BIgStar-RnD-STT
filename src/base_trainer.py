@@ -2,6 +2,7 @@
 Created on 2022/06/07
 @author Sangwoo Han
 """
+from genericpath import isdir
 import os
 import re
 from abc import ABC, abstractmethod, abstractproperty
@@ -17,11 +18,15 @@ import torch
 import torch.cuda
 import torch.nn as nn
 import torch.optim
+from deepspeed.ops.adam import DeepSpeedCPUAdam
 from logzero import logger
 from mlflow.entities import Run
 from mlflow.tracking import MlflowClient
 from optuna import Trial
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+from pytorch_lightning.utilities.deepspeed import (
+    convert_zero_checkpoint_to_fp32_state_dict,
+)
 from pytorch_lightning.utilities.types import EVAL_DATALOADERS, TRAIN_DATALOADERS
 from ruamel.yaml import YAML
 from torch.optim import Optimizer
@@ -39,6 +44,16 @@ def get_run(log_dir: str, run_id: str) -> Run:
     return run
 
 
+def _get_single_ckpt_path(ckpt_path: str) -> str:
+    if os.path.isdir(ckpt_path):
+        basename, ext = os.path.splitext(os.path.basename(ckpt_path))
+        new_ckpt_path = os.path.join(os.path.dirname(ckpt_path), f"{basename}.ds{ext}")
+        if not os.path.exists(new_ckpt_path):
+            convert_zero_checkpoint_to_fp32_state_dict(ckpt_path, new_ckpt_path)
+        return new_ckpt_path
+    return ckpt_path
+
+
 def get_ckpt_path(log_dir: str, run_id: str, load_best: bool = False) -> Optional[str]:
     run = get_run(log_dir, run_id)
     ckpt_root_dir = os.path.join(log_dir, run.info.experiment_id, run_id, "checkpoints")
@@ -47,12 +62,15 @@ def get_ckpt_path(log_dir: str, run_id: str, load_best: bool = False) -> Optiona
     if not os.path.exists(ckpt_path):
         return None
 
+    ckpt_path = _get_single_ckpt_path(ckpt_path)
+
     if load_best:
         ckpt = torch.load(ckpt_path, map_location="cpu")
         key = [k for k in ckpt["callbacks"].keys() if k.startswith("ModelCheckpoint")][
             0
         ]
         ckpt_path = ckpt["callbacks"][key]["best_model_path"]
+        ckpt_path = _get_single_ckpt_path(ckpt_path)
 
     return ckpt_path
 
@@ -111,8 +129,15 @@ def load_model_hparams(
 
 
 def _get_optimizer(
-    model: nn.Module, optim_name: str = "adamw", lr: float = 1e-3, decay: float = 0
+    model: nn.Module,
+    optim_name: str = "adamw",
+    lr: float = 1e-3,
+    decay: float = 0,
+    use_deepspeed: bool = False,
 ) -> Optimizer:
+    if use_deepspeed:
+        assert optim_name == "adamw", "If set use_deepspeed, adamw is only allowed"
+
     no_decay = ["bias", "LayerNorm.weight"]
 
     param_groups = [
@@ -137,7 +162,11 @@ def _get_optimizer(
     ]
 
     if optim_name == "adamw":
-        optim = DenseSparseAdamW(param_groups)
+        optim = (
+            DeepSpeedCPUAdam(param_groups)
+            if use_deepspeed
+            else DenseSparseAdamW(param_groups)
+        )
     elif optim_name == "sgd":
         optim = torch.optim.SGD(param_groups)
     else:
@@ -203,6 +232,7 @@ class BaseTrainerModel(pl.LightningModule, ABC):
         "run_id",
         "reset_early",
         "ckpt_path",
+        "use_deepspeed",
     ]
 
     def __init__(
@@ -218,6 +248,7 @@ class BaseTrainerModel(pl.LightningModule, ABC):
         early: int = 10,
         reset_early: bool = False,
         ckpt_path: Optional[str] = None,
+        use_deepspeed: bool = False,
         early_criterion: str = "wer",
         eval_step: int = 100,
         optim_name: str = "adamw",
@@ -252,6 +283,7 @@ class BaseTrainerModel(pl.LightningModule, ABC):
         self.early = early
         self.reset_early = reset_early
         self.ckpt_path = ckpt_path
+        self.use_deepspeed = use_deepspeed
         self.early_criterion = early_criterion
         self.eval_step = eval_step
         self.optim_name = optim_name
@@ -330,7 +362,9 @@ class BaseTrainerModel(pl.LightningModule, ABC):
             self._logged = True
 
     def configure_optimizers(self):
-        optimizer = _get_optimizer(self.model, self.optim_name, self.lr, self.decay)
+        optimizer = _get_optimizer(
+            self.model, self.optim_name, self.lr, self.decay, self.use_deepspeed
+        )
 
         scheduler = _get_scheduler(
             optimizer,
@@ -500,6 +534,7 @@ def train(
         val_check_interval=args.eval_step,
         callbacks=callbacks,
         logger=mlf_logger,
+        strategy="deepspeed_stage_2_offload" if args.use_deepspeed else None,
     )
 
     try:
@@ -525,23 +560,38 @@ def test(
     assert args.run_id is not None, "run_id must be specified"
     ckpt_path = get_ckpt_path(args.log_dir, args.run_id, load_best=True)
 
-    if trainer is None:
-        trainer_model = TrainerModel(
-            is_hptuning=is_hptuning, **filter_arguments(args, TrainerModel)
-        )
-        swa_warmup = int(get_run(args.log_dir, args.run_id).data.params["swa_warmup"])
-        callbacks = []
-        if swa_warmup > 0:
-            callbacks.append(StochasticWeightAveraging(swa_warmup))
-        trainer = pl.Trainer(
-            gpus=args.num_gpus,
-            precision=16 if args.mp_enabled else 32,
-            enable_model_summary=False,
-            logger=False,
-            callbacks=callbacks,
-        )
-    else:
-        trainer_model = trainer.lightning_module
+    # if trainer is None:
+    #     trainer_model = TrainerModel(
+    #         is_hptuning=is_hptuning, **filter_arguments(args, TrainerModel)
+    #     )
+    #     swa_warmup = int(get_run(args.log_dir, args.run_id).data.params["swa_warmup"])
+    #     callbacks = []
+    #     if swa_warmup > 0:
+    #         callbacks.append(StochasticWeightAveraging(swa_warmup))
+    #     trainer = pl.Trainer(
+    #         gpus=args.num_gpus,
+    #         precision=16 if args.mp_enabled else 32,
+    #         enable_model_summary=False,
+    #         logger=False,
+    #         callbacks=callbacks,
+    #     )
+    # else:
+    #     trainer_model = trainer.lightning_module
+
+    trainer_model = TrainerModel(
+        is_hptuning=is_hptuning, **filter_arguments(args, TrainerModel)
+    )
+    swa_warmup = int(get_run(args.log_dir, args.run_id).data.params["swa_warmup"])
+    callbacks = []
+    if swa_warmup > 0:
+        callbacks.append(StochasticWeightAveraging(swa_warmup))
+    trainer = pl.Trainer(
+        gpus=args.num_gpus,
+        precision=16 if args.mp_enabled else 32,
+        enable_model_summary=False,
+        logger=False,
+        callbacks=callbacks,
+    )
 
     results = trainer.test(trainer_model, ckpt_path=ckpt_path or None, verbose=False)
 

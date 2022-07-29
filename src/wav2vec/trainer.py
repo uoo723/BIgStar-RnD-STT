@@ -35,6 +35,7 @@ BATCH = Tuple[Dict[str, torch.Tensor], torch.Tensor]
 class Wav2VecTrainerModel(BaseTrainerModel):
     MODEL_HPARAMS: Iterable[str] = [
         "pretrained_model_name",
+        "use_pretrained_model",
         "num_hidden_layers",
         "num_attention_heads",
         "intermediate_size",
@@ -46,6 +47,7 @@ class Wav2VecTrainerModel(BaseTrainerModel):
     def __init__(
         self,
         pretrained_model_name: str = "kresnik/wav2vec2-large-xlsr-korean",
+        use_pretrained_model: bool = False,
         dataset_filepath: str = "./data/kspon_speech/preprocessed/transcripts.csv",
         cache_dir: str = "./data/huggingface/datasets",
         num_hidden_layers: int = 12,
@@ -59,6 +61,7 @@ class Wav2VecTrainerModel(BaseTrainerModel):
     ) -> None:
         super().__init__(*args, **kwargs)
         self.pretrained_model_name = pretrained_model_name
+        self.use_pretrained_model = use_pretrained_model
         self.dataset_filepath = dataset_filepath
         self.cache_dir = cache_dir
         self.num_hidden_layers = num_hidden_layers
@@ -106,6 +109,7 @@ class Wav2VecTrainerModel(BaseTrainerModel):
             batch_size=self.train_batch_size,
             shuffle=True,
             num_workers=self.num_workers,
+            pin_memory=self.device != torch.device("cpu"),
             collate_fn=partial(dataloader_collate_fn, processor=self.processor),
         )
 
@@ -114,6 +118,7 @@ class Wav2VecTrainerModel(BaseTrainerModel):
             self.val_dataset,
             batch_size=self.test_batch_size,
             num_workers=self.num_workers,
+            pin_memory=self.device != torch.device("cpu"),
             collate_fn=partial(dataloader_collate_fn, processor=self.processor),
         )
 
@@ -122,6 +127,7 @@ class Wav2VecTrainerModel(BaseTrainerModel):
             self.test_dataset,
             batch_size=self.test_batch_size,
             num_workers=self.num_workers,
+            pin_memory=self.device != torch.device("cpu"),
             collate_fn=partial(dataloader_collate_fn, processor=self.processor),
         )
 
@@ -135,13 +141,17 @@ class Wav2VecTrainerModel(BaseTrainerModel):
             hparams = {param: getattr(self, param) for param in self.model_hparams}
 
         self.processor = AutoProcessor.from_pretrained(self.pretrained_model_name)
-        self.model = Wav2Vec2ForCTC(
-            Wav2Vec2Config(
-                vocab_size=self.processor.tokenizer.vocab_size,
-                pad_token_id=self.processor.tokenizer.pad_token_id,
-                **filter_arguments(hparams, Wav2Vec2Config),
+
+        if hparams.get("use_pretrained_model", False):
+            self.model = Wav2Vec2ForCTC.from_pretrained(self.pretrained_model_name)
+        else:
+            self.model = Wav2Vec2ForCTC(
+                Wav2Vec2Config(
+                    vocab_size=self.processor.tokenizer.vocab_size,
+                    pad_token_id=self.processor.tokenizer.pad_token_id,
+                    **filter_arguments(hparams, Wav2Vec2Config),
+                )
             )
-        )
 
         if self.ckpt_path is not None:
             load_state_dict(self.model, self.ckpt_path, substitution=(r"^model\.", ""))
