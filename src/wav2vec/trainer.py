@@ -24,7 +24,7 @@ from transformers import AutoProcessor, Wav2Vec2Config, Wav2Vec2ForCTC
 from transformers.modeling_outputs import CausalLMOutput
 
 from .. import base_trainer
-from ..base_trainer import BaseTrainerModel, load_model_hparams
+from ..base_trainer import BaseTrainerModel, load_model_hparams, load_state_dict
 from ..dataset.kspon import KSponSpeechDataset, dataloader_collate_fn
 from ..dataset.zeroth_korean import ZerothKoreanDataset
 from ..utils import AttrDict, filter_arguments
@@ -142,6 +142,9 @@ class Wav2VecTrainerModel(BaseTrainerModel):
                 **filter_arguments(hparams, Wav2Vec2Config),
             )
         )
+
+        if self.ckpt_path is not None:
+            load_state_dict(self.model, self.ckpt_path, substitution=(r"^model\.", ""))
 
     def training_step(self, batch: BATCH, _) -> STEP_OUTPUT:
         batch_signal, batch_transcript = batch

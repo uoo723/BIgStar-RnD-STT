@@ -3,8 +3,10 @@ Created on 2022/06/07
 @author Sangwoo Han
 """
 import os
+import re
 from abc import ABC, abstractmethod, abstractproperty
 from ast import literal_eval
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, Union
 
@@ -53,6 +55,40 @@ def get_ckpt_path(log_dir: str, run_id: str, load_best: bool = False) -> Optiona
         ckpt_path = ckpt["callbacks"][key]["best_model_path"]
 
     return ckpt_path
+
+
+def load_state_dict(
+    model: nn.Module,
+    ckpt_path: str,
+    substitution: Optional[Tuple[str, str]] = None,
+) -> None:
+    ckpt = torch.load(ckpt_path, map_location="cpu")
+    substitution = substitution or ("", "")
+
+    swa_callback_key = None
+    callbacks: Dict[str, Any] = ckpt["callbacks"]
+    for key in callbacks.keys():
+        if "StochasticWeightAveraging" in key:
+            swa_callback_key = key
+            break
+
+    state_dict: Dict[str, torch.Tensor] = ckpt["state_dict"]
+
+    if swa_callback_key is not None and "average_model" in callbacks[swa_callback_key]:
+        avg_state_dict: Dict[str, torch.Tensor] = callbacks[swa_callback_key][
+            "average_model"
+        ]
+        avg_state_dict.pop("models_num")
+        state_dict.update(avg_state_dict)
+
+    state_dict = OrderedDict(
+        zip(
+            [re.sub(*substitution, key) for key in state_dict.keys()],
+            state_dict.values(),
+        )
+    )
+
+    model.load_state_dict(state_dict)
 
 
 def _get_gpu_info(num_gpus: int) -> List[str]:
@@ -166,6 +202,7 @@ class BaseTrainerModel(pl.LightningModule, ABC):
         "data_dir",
         "run_id",
         "reset_early",
+        "ckpt_path",
     ]
 
     def __init__(
@@ -180,6 +217,7 @@ class BaseTrainerModel(pl.LightningModule, ABC):
         valid_size: float = 0.2,
         early: int = 10,
         reset_early: bool = False,
+        ckpt_path: Optional[str] = None,
         early_criterion: str = "wer",
         eval_step: int = 100,
         optim_name: str = "adamw",
@@ -213,6 +251,7 @@ class BaseTrainerModel(pl.LightningModule, ABC):
         self.valid_size = valid_size
         self.early = early
         self.reset_early = reset_early
+        self.ckpt_path = ckpt_path
         self.early_criterion = early_criterion
         self.eval_step = eval_step
         self.optim_name = optim_name
@@ -434,6 +473,16 @@ def train(
     if args.swa_warmup > 0:
         callbacks.append(StochasticWeightAveraging(args.swa_warmup))
 
+    ckpt_path = (
+        get_ckpt_path(args.log_dir, args.run_id, load_best=False)
+        if args.run_id
+        else None
+    )
+
+    if args.load_only_weights:
+        args.ckpt_path = ckpt_path
+        ckpt_path = None
+
     trainer_model = TrainerModel(
         is_hptuning=is_hptuning,
         trial=trial,
@@ -451,12 +500,6 @@ def train(
         val_check_interval=args.eval_step,
         callbacks=callbacks,
         logger=mlf_logger,
-    )
-
-    ckpt_path = (
-        get_ckpt_path(args.log_dir, args.run_id, load_best=False)
-        if args.run_id
-        else None
     )
 
     try:
