@@ -43,7 +43,7 @@ _train_options = [
     optgroup.option("--skip-test", is_flag=True, default=False, help="If set to true, skip test after training"),
     optgroup.option("--run-id", type=click.STRING, help="MLFlow Run ID for resume training"),
     optgroup.option("--model-name", type=click.STRING, required=True, help="Model name"),
-    optgroup.option("--dataset-name", type=click.STRING, required=True, default="dataset", help="Dataset name"),
+    optgroup.option("--dataset-name", type=click.STRING, required=True, default="kspon", help="Dataset name"),
     optgroup.option("--valid-size", type=FLOAT_INT, default=0.2, help="Validation dataset size"),
     optgroup.option("--seed", type=click.INT, default=0, help="Seed for reproducibility"),
     optgroup.option("--swa-warmup", type=click.INT, default=10, help="Warmup for SWA. Disable: 0"),

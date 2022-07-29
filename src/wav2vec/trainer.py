@@ -2,16 +2,15 @@
 Created on 2022/06/07
 @author Sangwoo Han
 """
-from collections import OrderedDict
 from functools import partial
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 import pytorch_lightning as pl
 import torch
 from jiwer import cer as compute_cer
 from jiwer import wer as compute_wer
-from logzero import logger
 from optuna import Trial
 from pytorch_lightning.utilities.types import (
     EPOCH_OUTPUT,
@@ -21,17 +20,13 @@ from pytorch_lightning.utilities.types import (
 )
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Subset
-from tqdm.auto import tqdm
 from transformers import AutoProcessor, Wav2Vec2Config, Wav2Vec2ForCTC
 from transformers.modeling_outputs import CausalLMOutput
 
 from .. import base_trainer
-from ..base_trainer import BaseTrainerModel, get_ckpt_path, load_model_hparams
+from ..base_trainer import BaseTrainerModel, load_model_hparams
 from ..dataset.kspon import KSponSpeechDataset, dataloader_collate_fn
-from ..dataset.zeroth_korean import (
-    dataloader_collate_fn as zeroth_korean_dataloader_collate_fn,
-)
-from ..dataset.zeroth_korean import load_zeroth_korean_dataset
+from ..dataset.zeroth_korean import ZerothKoreanDataset
 from ..utils import AttrDict, filter_arguments
 
 BATCH = Tuple[Dict[str, torch.Tensor], torch.Tensor]
@@ -79,14 +74,17 @@ class Wav2VecTrainerModel(BaseTrainerModel):
         return Wav2VecTrainerModel.MODEL_HPARAMS
 
     def prepare_data(self) -> None:
-        load_zeroth_korean_dataset(cache_dir=self.cache_dir)
+        ZerothKoreanDataset(cache_dir=self.cache_dir)
 
     def setup_dataset(self, stage: Optional[str] = None) -> None:
         if stage == "predict":
             raise ValueError(f"{stage} stage is not supported")
 
         if stage == "fit" and self.train_dataset is None:
-            dataset = KSponSpeechDataset(self.dataset_filepath)
+            if self.dataset_name == "kspon":
+                dataset = KSponSpeechDataset(self.dataset_filepath)
+            else:
+                dataset = ZerothKoreanDataset(cache_dir=self.cache_dir, split="train")
 
             self.train_ids, self.valid_ids = train_test_split(
                 np.arange(len(dataset)),
@@ -98,7 +96,7 @@ class Wav2VecTrainerModel(BaseTrainerModel):
             self.val_dataset = Subset(dataset, self.valid_ids)
 
         if stage == "test" and self.test_dataset is None:
-            self.test_dataset = load_zeroth_korean_dataset(
+            self.test_dataset = ZerothKoreanDataset(
                 cache_dir=self.cache_dir, split="test"
             )
 
@@ -124,9 +122,7 @@ class Wav2VecTrainerModel(BaseTrainerModel):
             self.test_dataset,
             batch_size=self.test_batch_size,
             num_workers=self.num_workers,
-            collate_fn=partial(
-                zeroth_korean_dataloader_collate_fn, processor=self.processor
-            ),
+            collate_fn=partial(dataloader_collate_fn, processor=self.processor),
         )
 
     def setup_model(self, stage: Optional[str] = None) -> None:
@@ -179,12 +175,10 @@ class Wav2VecTrainerModel(BaseTrainerModel):
         self, outputs: EPOCH_OUTPUT, is_val: bool = True
     ) -> None:
         predictions = [p2 for p1 in outputs for p2 in p1]
-        if is_val:
-            gt = self.val_dataset.dataset.df.iloc[self.valid_ids][: len(predictions)][
-                "transcript"
-            ].tolist()
-        else:
-            gt = self.test_dataset.dataset["text"][: len(predictions)]
+        df: pd.DataFrame = (
+            self.val_dataset.dataset.df if is_val else self.test_dataset.df
+        )
+        gt = df["transcript"][: len(predictions)].tolist()
 
         cer = compute_cer(gt, predictions)
         wer = compute_wer(gt, predictions)
@@ -210,7 +204,7 @@ class Wav2VecTrainerModel(BaseTrainerModel):
 def check_args(args: AttrDict) -> None:
     valid_early_criterion = ["cer", "wer", "loss"]
     valid_model_name = ["Wav2Vec"]
-    valid_dataset_name = ["dataset"]
+    valid_dataset_name = ["kspon", "zeroth_korean"]
     base_trainer.check_args(
         args, valid_early_criterion, valid_model_name, valid_dataset_name
     )
@@ -235,7 +229,7 @@ def train(
     )
 
 
-def test_bak(
+def test(
     args: AttrDict, trainer: Optional[pl.Trainer] = None, is_hptuning: bool = False
 ) -> Dict[str, float]:
     return base_trainer.test(
@@ -249,93 +243,3 @@ def test_bak(
 
 def predict(args: AttrDict) -> Any:
     pass
-
-
-def test(
-    args: AttrDict, trainer: Optional[pl.Trainer] = None, is_hptuning: bool = False
-) -> Dict[str, float]:
-    ################################# Load Dataset #####################################
-    logger.info("Load dataset...")
-    processor = AutoProcessor.from_pretrained(args.pretrained_model_name)
-    dataset = load_zeroth_korean_dataset(cache_dir=args.cache_dir, split="test")
-    dataloader = DataLoader(
-        dataset,
-        batch_size=args.test_batch_size,
-        num_workers=args.num_workers,
-        collate_fn=partial(zeroth_korean_dataloader_collate_fn, processor=processor),
-        persistent_workers=True,
-    )
-    iter(dataloader)  # To avoid segmentation fault
-    ####################################################################################
-
-    ################################## Load Model ######################################
-    logger.info("Load model...")
-    hparams = load_model_hparams(
-        args.log_dir, args.run_id, Wav2VecTrainerModel.MODEL_HPARAMS
-    )
-
-    model = Wav2Vec2ForCTC(
-        Wav2Vec2Config(
-            vocab_size=processor.tokenizer.vocab_size,
-            pad_token_id=processor.tokenizer.pad_token_id,
-            **filter_arguments(hparams, Wav2Vec2Config),
-        )
-    )
-
-    ckpt_path = get_ckpt_path(args.log_dir, args.run_id, load_best=True)
-    ckpt = torch.load(ckpt_path, map_location="cpu")
-
-    swa_callback_key = None
-    callbacks: Dict[str, Any] = ckpt["callbacks"]
-    for key in callbacks.keys():
-        if "StochasticWeightAveraging" in key:
-            swa_callback_key = key
-            break
-
-    state_dict: Dict[str, torch.Tensor] = ckpt["state_dict"]
-
-    if swa_callback_key is not None and "average_model" in callbacks[swa_callback_key]:
-        logger.info("Use averaged weights")
-        avg_state_dict: Dict[str, torch.Tensor] = callbacks[swa_callback_key][
-            "average_model"
-        ]
-        avg_state_dict.pop("models_num")
-        state_dict.update(avg_state_dict)
-
-    state_dict = OrderedDict(
-        zip(
-            [key.replace("model.", "") for key in state_dict.keys()],
-            state_dict.values(),
-        )
-    )
-
-    model.load_state_dict(state_dict)
-    model.to(args.device)
-    ####################################################################################
-
-    ##################################### Test #########################################
-    predictions = []
-
-    model.eval()
-    for batch in tqdm(dataloader):
-        batch_signal, _ = batch
-        inputs = filter_arguments(batch_signal, model.forward)
-        inputs = {k: v.to(args.device) for k, v in inputs.items()}
-
-        with torch.no_grad():
-            outputs: CausalLMOutput = model(**inputs)
-
-        pred_ids = outputs.logits.argmax(dim=-1)
-        predictions.extend(processor.batch_decode(pred_ids))
-
-    gt = dataset["text"][: len(predictions)]
-
-    cer = compute_cer(gt, predictions)
-    wer = compute_wer(gt, predictions)
-
-    results = {"test/cer": cer, "test/wer": wer}
-
-    logger.info(f"results:\ncer: {cer:.4f}\nwer: {wer:.4f}")
-    ####################################################################################
-
-    return results
