@@ -188,10 +188,13 @@ class Wav2VecTrainerModel(BaseTrainerModel):
         self, outputs: EPOCH_OUTPUT, is_val: bool = True
     ) -> None:
         predictions = [p2 for p1 in outputs for p2 in p1]
-        df: pd.DataFrame = (
-            self.val_dataset.dataset.df if is_val else self.test_dataset.df
-        )
-        gt = df["transcript"][: len(predictions)].tolist()
+
+        if is_val:
+            df: pd.DataFrame = self.val_dataset.dataset.df
+            gt = df["transcript"][self.valid_ids][: len(predictions)].tolist()
+        else:
+            df: pd.DataFrame = self.test_dataset.df
+            gt = df["transcript"][: len(predictions)].tolist()
 
         cer = compute_cer(gt, predictions)
         wer = compute_wer(gt, predictions)
