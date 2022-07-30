@@ -558,26 +558,7 @@ def test(
     is_hptuning: bool = False,
 ) -> Dict[str, float]:
     assert args.run_id is not None, "run_id must be specified"
-    ckpt_path = get_ckpt_path(args.log_dir, args.run_id, load_best=True)
-
-    # if trainer is None:
-    #     trainer_model = TrainerModel(
-    #         is_hptuning=is_hptuning, **filter_arguments(args, TrainerModel)
-    #     )
-    #     swa_warmup = int(get_run(args.log_dir, args.run_id).data.params["swa_warmup"])
-    #     callbacks = []
-    #     if swa_warmup > 0:
-    #         callbacks.append(StochasticWeightAveraging(swa_warmup))
-    #     trainer = pl.Trainer(
-    #         gpus=args.num_gpus,
-    #         precision=16 if args.mp_enabled else 32,
-    #         enable_model_summary=False,
-    #         logger=False,
-    #         callbacks=callbacks,
-    #     )
-    # else:
-    #     trainer_model = trainer.lightning_module
-
+    ckpt_path = get_ckpt_path(args.log_dir, args.run_id, load_best=not args.load_last)
     trainer_model = TrainerModel(
         is_hptuning=is_hptuning, **filter_arguments(args, TrainerModel)
     )

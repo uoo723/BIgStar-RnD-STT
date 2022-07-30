@@ -51,6 +51,7 @@ _train_options = [
     optgroup.option("--early", type=click.INT, default=10, help="Early stopping step"),
     optgroup.option("--reset-early", is_flag=True, default=False, help="Reset early"),
     optgroup.option("--load-only-weights", is_flag=True, default=False, help="Load only weights not all training states"),
+    optgroup.option("--load-last", is_flag=True, default=False, help="Load last model instead of best model in test mode"),
     optgroup.option("--early-criterion", type=click.Choice(["cer", "wer", "loss"]), default="cer", help="Early stopping criterion"),
     optgroup.option("--eval-step", type=click.INT, default=100, help="Evaluation step during training"),
     optgroup.option("--num-epochs", type=click.INT, default=40, help="Total number of epochs"),
