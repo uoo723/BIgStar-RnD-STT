@@ -40,8 +40,6 @@ class Wav2VecTrainerModel(BaseTrainerModel):
         "num_attention_heads",
         "intermediate_size",
         "hidden_size",
-        "ctc_loss_reduction",
-        "ctc_zero_infinity",
     ]
 
     def __init__(
