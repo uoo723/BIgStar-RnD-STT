@@ -140,6 +140,8 @@ class Wav2VecTrainerModel(BaseTrainerModel):
                 Wav2Vec2Config(
                     vocab_size=self.processor.tokenizer.vocab_size,
                     pad_token_id=self.processor.tokenizer.pad_token_id,
+                    ctc_loss_reduction=self.ctc_loss_reduction,
+                    ctc_zero_infinity=self.ctc_zero_infinity,
                     **filter_arguments(hparams, Wav2Vec2Config),
                 )
             )
