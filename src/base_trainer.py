@@ -52,7 +52,9 @@ def _get_single_ckpt_path(ckpt_path: str) -> str:
     return ckpt_path
 
 
-def get_ckpt_path(log_dir: str, run_id: str, load_best: bool = False) -> Optional[str]:
+def get_ckpt_path(
+    log_dir: str, run_id: str, load_best: bool = False, use_deepspeed: bool = False
+) -> Optional[str]:
     run = get_run(log_dir, run_id)
     ckpt_root_dir = os.path.join(log_dir, run.info.experiment_id, run_id, "checkpoints")
     ckpt_path = os.path.join(ckpt_root_dir, "last.ckpt")
@@ -60,15 +62,14 @@ def get_ckpt_path(log_dir: str, run_id: str, load_best: bool = False) -> Optiona
     if not os.path.exists(ckpt_path):
         return None
 
-    ckpt_path = _get_single_ckpt_path(ckpt_path)
+    if not load_best:
+        return _get_single_ckpt_path(ckpt_path) if use_deepspeed else ckpt_path
 
-    if load_best:
-        ckpt = torch.load(ckpt_path, map_location="cpu")
-        key = [k for k in ckpt["callbacks"].keys() if k.startswith("ModelCheckpoint")][
-            0
-        ]
-        ckpt_path = ckpt["callbacks"][key]["best_model_path"]
-        ckpt_path = _get_single_ckpt_path(ckpt_path)
+    ckpt_path = _get_single_ckpt_path(ckpt_path)
+    ckpt = torch.load(ckpt_path, map_location="cpu")
+    key = [k for k in ckpt["callbacks"].keys() if k.startswith("ModelCheckpoint")][0]
+    ckpt_path = ckpt["callbacks"][key]["best_model_path"]
+    ckpt_path = _get_single_ckpt_path(ckpt_path) if use_deepspeed else ckpt_path
 
     return ckpt_path
 
@@ -77,19 +78,32 @@ def _get_gpu_info(num_gpus: int) -> List[str]:
     return [f"{i}: {torch.cuda.get_device_name(i)}" for i in range(num_gpus)]
 
 
-def load_model_hparams(
-    log_dir: str, run_id: str, model_hparams: Iterable[str]
+def _get_run_data(
+    log_dir: str, run_id: str, data_type: str = "params"
 ) -> Dict[str, Any]:
+    assert data_type in ["params", "tags"]
+
+    run = get_run(log_dir, run_id)
     ret_params: Dict[str, Any] = {}
-    params: Dict[str, Any] = get_run(log_dir, run_id).data.params
+    params: Dict[str, Any] = run.data.params if data_type == "params" else run.data.tags
 
     for k, v in params.items():
-        if k in model_hparams:
-            try:
-                ret_params[k] = literal_eval(v)
-            except Exception:
-                ret_params[k] = v  # str type
+        try:
+            ret_params[k] = literal_eval(v)
+        except Exception:
+            ret_params[k] = v  # str type
     return ret_params
+
+
+def get_model_hparams(
+    log_dir: str, run_id: str, model_hparams: Iterable[str]
+) -> Dict[str, Any]:
+    params: Dict[str, Any] = _get_run_data(log_dir, run_id)
+    return {k: v for k, v in params.items() if k in model_hparams}
+
+
+def get_run_tags(log_dir: str, run_id: str) -> Dict[str, Any]:
+    return _get_run_data(log_dir, run_id, data_type="tags")
 
 
 def load_model_state(
@@ -389,6 +403,7 @@ class BaseTrainerModel(pl.LightningModule, ABC):
         experiment.set_tag(self.logger.run_id, "host", os.uname()[1])
         experiment.set_tag(self.logger.run_id, "model_name", self.model_name)
         experiment.set_tag(self.logger.run_id, "dataset_name", self.dataset_name)
+        experiment.set_tag(self.logger.run_id, "use_deepspeed", self.use_deepspeed)
 
         if self.run_id is not None:
             experiment.set_tag(self.logger.run_id, "resume", self.run_id)
@@ -516,7 +531,7 @@ def train(
         ckpt_path = None
 
     if args.run_id is not None:
-        hparams = load_model_hparams(
+        hparams = get_model_hparams(
             args.log_dir, args.run_id, TrainerModel.MODEL_HPARAMS
         )
         args.update(hparams)
@@ -567,11 +582,18 @@ def test(
     # assert args.run_id is not None, "run_id must be specified"
 
     ckpt_path = None
+    use_deepspeed = args.use_deepspeed
     callbacks = []
 
     if args.run_id:
+        tags = get_run_tags(args.log_dir, args.run_id)
+
+        use_deepspeed = tags.get("use_deepspeed", False)
         ckpt_path = get_ckpt_path(
-            args.log_dir, args.run_id, load_best=not args.load_last
+            args.log_dir,
+            args.run_id,
+            load_best=not args.load_last,
+            use_deepspeed=use_deepspeed,
         )
 
         swa_warmup = int(get_run(args.log_dir, args.run_id).data.params["swa_warmup"])
@@ -579,17 +601,21 @@ def test(
         if swa_warmup > 0:
             callbacks.append(StochasticWeightAveraging(swa_warmup))
 
-    trainer_model = TrainerModel(
-        is_hptuning=is_hptuning, **filter_arguments(args, TrainerModel)
-    )
+    if trainer is None:
+        trainer_model = TrainerModel(
+            is_hptuning=is_hptuning, **filter_arguments(args, TrainerModel)
+        )
 
-    trainer = pl.Trainer(
-        gpus=args.num_gpus,
-        precision=16 if args.mp_enabled else 32,
-        enable_model_summary=False,
-        logger=False,
-        callbacks=callbacks,
-    )
+        trainer = pl.Trainer(
+            gpus=args.num_gpus,
+            precision=16 if args.mp_enabled else 32,
+            enable_model_summary=False,
+            logger=False,
+            callbacks=callbacks,
+            strategy="deepspeed_stage_2_offload" if use_deepspeed else None,
+        )
+    else:
+        trainer_model = trainer.lightning_module
 
     results = trainer.test(trainer_model, ckpt_path=ckpt_path, verbose=False)
 
