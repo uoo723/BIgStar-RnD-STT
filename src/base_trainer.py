@@ -307,6 +307,12 @@ class BaseTrainerModel(pl.LightningModule, ABC):
     def model_hparams(self) -> List[str]:
         """Model hparam names"""
 
+    def update_model_params(self):
+        if self.run_id is not None:
+            hparams = load_model_hparams(self.log_dir, self.run_id, self.model_hparams)
+        for param in self.model_hparams:
+            setattr(self, param, hparams[param])
+
     def setup(self, stage: Optional[str] = None) -> None:
         self.setup_dataset(stage)
         self.setup_model(stage)
@@ -549,6 +555,9 @@ def train(
         pass
 
     args.run_id = mlf_logger.run_id
+    args.load_model_only_weights = False
+    args.ckpt_path = None
+
     model_checkpoint: ModelCheckpoint = callbacks[2]
     best_score: Optional[torch.Tensor] = model_checkpoint.best_model_score
     best_score = best_score.item() if best_score else 0

@@ -70,6 +70,7 @@ class Wav2VecTrainerModel(BaseTrainerModel):
         self.hidden_size = hidden_size
         self.ctc_loss_reduction = ctc_loss_reduction
         self.ctc_zero_infinity = ctc_zero_infinity
+        self.update_model_params()
         self.save_hyperparameters(ignore=self.IGNORE_HPARAMS)
 
     @property
@@ -135,14 +136,11 @@ class Wav2VecTrainerModel(BaseTrainerModel):
         if self.model is not None:
             return
 
-        if self.run_id is not None:
-            hparams = load_model_hparams(self.log_dir, self.run_id, self.model_hparams)
-        else:
-            hparams = {param: getattr(self, param) for param in self.model_hparams}
+        hparams = {param: getattr(self, param) for param in self.model_hparams}
 
         self.processor = AutoProcessor.from_pretrained(self.pretrained_model_name)
 
-        if hparams.get("use_pretrained_model", False):
+        if self.use_pretrained_model:
             self.model = Wav2Vec2ForCTC.from_pretrained(self.pretrained_model_name)
         else:
             self.model = Wav2Vec2ForCTC(
