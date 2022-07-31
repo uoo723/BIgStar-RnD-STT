@@ -47,8 +47,7 @@ def _get_single_ckpt_path(ckpt_path: str) -> str:
     if os.path.isdir(ckpt_path):
         basename, ext = os.path.splitext(os.path.basename(ckpt_path))
         new_ckpt_path = os.path.join(os.path.dirname(ckpt_path), f"{basename}.ds{ext}")
-        if not os.path.exists(new_ckpt_path):
-            convert_zero_checkpoint_to_fp32_state_dict(ckpt_path, new_ckpt_path)
+        convert_zero_checkpoint_to_fp32_state_dict(ckpt_path, new_ckpt_path)
         return new_ckpt_path
     return ckpt_path
 
