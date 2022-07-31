@@ -24,7 +24,7 @@ from transformers import AutoProcessor, Wav2Vec2Config, Wav2Vec2ForCTC
 from transformers.modeling_outputs import CausalLMOutput
 
 from .. import base_trainer
-from ..base_trainer import BaseTrainerModel, load_model_hparams
+from ..base_trainer import BaseTrainerModel
 from ..dataset.kspon import KSponSpeechDataset, dataloader_collate_fn
 from ..dataset.zeroth_korean import ZerothKoreanDataset
 from ..utils import AttrDict, filter_arguments
@@ -33,7 +33,7 @@ BATCH = Tuple[Dict[str, torch.Tensor], torch.Tensor]
 
 
 class Wav2VecTrainerModel(BaseTrainerModel):
-    MODEL_HPARAMS: Iterable[str] = [
+    MODEL_HPARAMS: Iterable[str] = BaseTrainerModel.MODEL_HPARAMS + [
         "pretrained_model_name",
         "use_pretrained_model",
         "num_hidden_layers",
@@ -68,12 +68,7 @@ class Wav2VecTrainerModel(BaseTrainerModel):
         self.hidden_size = hidden_size
         self.ctc_loss_reduction = ctc_loss_reduction
         self.ctc_zero_infinity = ctc_zero_infinity
-        self.update_model_params()
         self.save_hyperparameters(ignore=self.IGNORE_HPARAMS)
-
-    @property
-    def model_hparams(self) -> Iterable[str]:
-        return Wav2VecTrainerModel.MODEL_HPARAMS
 
     def prepare_data(self) -> None:
         ZerothKoreanDataset(cache_dir=self.cache_dir)
@@ -134,7 +129,7 @@ class Wav2VecTrainerModel(BaseTrainerModel):
         if self.model is not None:
             return
 
-        hparams = {param: getattr(self, param) for param in self.model_hparams}
+        hparams = {param: getattr(self, param) for param in self.MODEL_HPARAMS}
 
         self.processor = AutoProcessor.from_pretrained(self.pretrained_model_name)
 

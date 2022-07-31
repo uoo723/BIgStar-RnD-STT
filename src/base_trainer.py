@@ -200,6 +200,8 @@ class BaseTrainerModel(pl.LightningModule, ABC):
         "use_deepspeed",
     ]
 
+    MODEL_HPARAMS: Iterable[str] = []
+
     def __init__(
         self,
         num_gpus: int = 1,
@@ -302,17 +304,6 @@ class BaseTrainerModel(pl.LightningModule, ABC):
     @abstractmethod
     def setup_model(self, stage: Optional[str] = None) -> None:
         pass
-
-    @abstractproperty
-    def model_hparams(self) -> List[str]:
-        """Model hparam names"""
-
-    def update_model_params(self):
-        if self.run_id is not None:
-            hparams = load_model_hparams(self.log_dir, self.run_id, self.model_hparams)
-        for param in self.model_hparams:
-            if param in hparams:
-                setattr(self, param, hparams[param])
 
     def setup(self, stage: Optional[str] = None) -> None:
         self.setup_dataset(stage)
@@ -529,6 +520,12 @@ def train(
     if args.load_only_weights:
         args.ckpt_path = ckpt_path
         ckpt_path = None
+
+    if args.run_id is not None:
+        hparams = load_model_hparams(
+            args.log_dir, args.run_id, TrainerModel.MODEL_HPARAMS
+        )
+        args.update(hparams)
 
     trainer_model = TrainerModel(
         is_hptuning=is_hptuning,
