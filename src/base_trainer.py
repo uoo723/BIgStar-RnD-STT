@@ -311,7 +311,8 @@ class BaseTrainerModel(pl.LightningModule, ABC):
         if self.run_id is not None:
             hparams = load_model_hparams(self.log_dir, self.run_id, self.model_hparams)
         for param in self.model_hparams:
-            setattr(self, param, hparams[param])
+            if param in hparams:
+                setattr(self, param, hparams[param])
 
     def setup(self, stage: Optional[str] = None) -> None:
         self.setup_dataset(stage)
