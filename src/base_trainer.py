@@ -4,7 +4,7 @@ Created on 2022/06/07
 """
 import os
 import re
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 from ast import literal_eval
 from collections import OrderedDict
 from pathlib import Path
@@ -91,6 +91,38 @@ def load_model_hparams(
             except Exception:
                 ret_params[k] = v  # str type
     return ret_params
+
+
+def load_model_state(
+    model: nn.Module, ckpt_path: str, substitution: Optional[Tuple] = None
+) -> None:
+    ckpt = torch.load(ckpt_path, map_location="cpu")
+    substitution = substitution or ("", "")
+
+    swa_callback_key = None
+    callbacks: Dict[str, Any] = ckpt["callbacks"]
+    for key in callbacks.keys():
+        if "StochasticWeightAveraging" in key:
+            swa_callback_key = key
+            break
+
+    state_dict: Dict[str, torch.Tensor] = ckpt["state_dict"]
+
+    if swa_callback_key is not None and "average_model" in callbacks[swa_callback_key]:
+        avg_state_dict: Dict[str, torch.Tensor] = callbacks[swa_callback_key][
+            "average_model"
+        ]
+        avg_state_dict.pop("models_num")
+        state_dict.update(avg_state_dict)
+
+    state_dict = OrderedDict(
+        zip(
+            [re.sub(*substitution, key) for key in state_dict.keys()],
+            state_dict.values(),
+        )
+    )
+
+    model.load_state_dict(state_dict)
 
 
 def _get_optimizer(
@@ -325,45 +357,8 @@ class BaseTrainerModel(pl.LightningModule, ABC):
             self._logged = True
 
         if self.ckpt_path:
-            self.load_model_state()
-
-    def load_model_state(self) -> None:
-        if self.model is None:
-            logger.warning("model is not set")
-            return
-
-        logger.info(f"Load model weights from ({self.ckpt_path})")
-
-        ckpt = torch.load(self.ckpt_path, map_location="cpu")
-        substitution = (r"^model\.", "")
-
-        swa_callback_key = None
-        callbacks: Dict[str, Any] = ckpt["callbacks"]
-        for key in callbacks.keys():
-            if "StochasticWeightAveraging" in key:
-                swa_callback_key = key
-                break
-
-        state_dict: Dict[str, torch.Tensor] = ckpt["state_dict"]
-
-        if (
-            swa_callback_key is not None
-            and "average_model" in callbacks[swa_callback_key]
-        ):
-            avg_state_dict: Dict[str, torch.Tensor] = callbacks[swa_callback_key][
-                "average_model"
-            ]
-            avg_state_dict.pop("models_num")
-            state_dict.update(avg_state_dict)
-
-        state_dict = OrderedDict(
-            zip(
-                [re.sub(*substitution, key) for key in state_dict.keys()],
-                state_dict.values(),
-            )
-        )
-
-        self.model.load_state_dict(state_dict)
+            logger.info(f"Load model weights from ({self.ckpt_path})")
+            load_model_state(self.model, self.ckpt_path, substitution=(r"^model\.", ""))
 
     def configure_optimizers(self):
         optimizer = _get_optimizer(
