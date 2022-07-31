@@ -429,8 +429,8 @@ def check_args(
     valid_model_name: List[str],
     valid_dataset_name: List[str],
 ) -> None:
-    if args.mode in ["test", "predict"]:
-        assert args.run_id is not None, f"run_id must be specified in mode {args.mode}"
+    # if args.mode in ["test", "predict"]:
+    #     assert args.run_id is not None, f"run_id must be specified in mode {args.mode}"
 
     assert (
         args.early_criterion in valid_early_criterion
@@ -565,15 +565,25 @@ def test(
     trainer: Optional[pl.Trainer] = None,
     is_hptuning: bool = False,
 ) -> Dict[str, float]:
-    assert args.run_id is not None, "run_id must be specified"
-    ckpt_path = get_ckpt_path(args.log_dir, args.run_id, load_best=not args.load_last)
+    # assert args.run_id is not None, "run_id must be specified"
+
+    ckpt_path = None
+    callbacks = []
+
+    if args.run_id:
+        ckpt_path = get_ckpt_path(
+            args.log_dir, args.run_id, load_best=not args.load_last
+        )
+
+        swa_warmup = int(get_run(args.log_dir, args.run_id).data.params["swa_warmup"])
+        callbacks = []
+        if swa_warmup > 0:
+            callbacks.append(StochasticWeightAveraging(swa_warmup))
+
     trainer_model = TrainerModel(
         is_hptuning=is_hptuning, **filter_arguments(args, TrainerModel)
     )
-    swa_warmup = int(get_run(args.log_dir, args.run_id).data.params["swa_warmup"])
-    callbacks = []
-    if swa_warmup > 0:
-        callbacks.append(StochasticWeightAveraging(swa_warmup))
+
     trainer = pl.Trainer(
         gpus=args.num_gpus,
         precision=16 if args.mp_enabled else 32,
@@ -582,7 +592,7 @@ def test(
         callbacks=callbacks,
     )
 
-    results = trainer.test(trainer_model, ckpt_path=ckpt_path or None, verbose=False)
+    results = trainer.test(trainer_model, ckpt_path=ckpt_path, verbose=False)
 
     if results is not None:
         results = results[0]
