@@ -585,7 +585,7 @@ def test(
     use_deepspeed = args.use_deepspeed
     callbacks = []
 
-    if args.run_id:
+    if args.run_id is not None:
         tags = get_run_tags(args.log_dir, args.run_id)
 
         use_deepspeed = tags.get("use_deepspeed", False)
@@ -595,6 +595,11 @@ def test(
             load_best=not args.load_last,
             use_deepspeed=use_deepspeed,
         )
+
+        hparams = get_model_hparams(
+            args.log_dir, args.run_id, TrainerModel.MODEL_HPARAMS
+        )
+        args.update(hparams)
 
         swa_warmup = int(get_run(args.log_dir, args.run_id).data.params["swa_warmup"])
         callbacks = []
