@@ -581,48 +581,33 @@ def test(
 ) -> Dict[str, float]:
     # assert args.run_id is not None, "run_id must be specified"
 
-    ckpt_path = None
-    use_deepspeed = args.use_deepspeed
-    callbacks = []
-
     if args.run_id is not None:
-        tags = get_run_tags(args.log_dir, args.run_id)
-
-        use_deepspeed = tags.get("use_deepspeed", False)
         ckpt_path = get_ckpt_path(
-            args.log_dir,
-            args.run_id,
-            load_best=not args.load_last,
-            use_deepspeed=use_deepspeed,
+            args.log_dir, args.run_id, load_best=not args.load_last
         )
-
         hparams = get_model_hparams(
             args.log_dir, args.run_id, TrainerModel.MODEL_HPARAMS
         )
         args.update(hparams)
-
-        swa_warmup = int(get_run(args.log_dir, args.run_id).data.params["swa_warmup"])
-        callbacks = []
-        if swa_warmup > 0:
-            callbacks.append(StochasticWeightAveraging(swa_warmup))
 
     if trainer is None:
         trainer_model = TrainerModel(
             is_hptuning=is_hptuning, **filter_arguments(args, TrainerModel)
         )
 
+        trainer_model.setup(stage="test")
+        load_model_state(trainer_model, ckpt_path)
+
         trainer = pl.Trainer(
             gpus=args.num_gpus,
             precision=16 if args.mp_enabled else 32,
             enable_model_summary=False,
             logger=False,
-            callbacks=callbacks,
-            strategy="deepspeed_stage_2_offload" if use_deepspeed else None,
         )
     else:
-        trainer_model = trainer.lightning_module
+        trainer_model = None
 
-    results = trainer.test(trainer_model, ckpt_path=ckpt_path, verbose=False)
+    results = trainer.test(trainer_model, verbose=False)
 
     if results is not None:
         results = results[0]
