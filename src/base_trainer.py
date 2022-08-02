@@ -107,7 +107,10 @@ def get_run_tags(log_dir: str, run_id: str) -> Dict[str, Any]:
 
 
 def load_model_state(
-    model: nn.Module, ckpt_path: str, substitution: Optional[Tuple] = None
+    model: nn.Module,
+    ckpt_path: str,
+    substitution: Optional[Tuple] = None,
+    load_average_model: bool = True,
 ) -> None:
     ckpt = torch.load(ckpt_path, map_location="cpu")
     substitution = substitution or ("", "")
@@ -121,7 +124,11 @@ def load_model_state(
 
     state_dict: Dict[str, torch.Tensor] = ckpt["state_dict"]
 
-    if swa_callback_key is not None and "average_model" in callbacks[swa_callback_key]:
+    if (
+        load_average_model
+        and swa_callback_key is not None
+        and "average_model" in callbacks[swa_callback_key]
+    ):
         avg_state_dict: Dict[str, torch.Tensor] = callbacks[swa_callback_key][
             "average_model"
         ]
