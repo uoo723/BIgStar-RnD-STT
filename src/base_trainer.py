@@ -528,7 +528,7 @@ def train(
         callbacks.append(StochasticWeightAveraging(args.swa_warmup))
 
     ckpt_path = (
-        get_ckpt_path(args.log_dir, args.run_id, load_best=False)
+        get_ckpt_path(args.log_dir, args.run_id, load_best=args.load_best)
         if args.run_id
         else None
     )
@@ -571,6 +571,13 @@ def train(
     args.run_id = mlf_logger.run_id
     args.load_model_only_weights = False
     args.ckpt_path = None
+
+    if args.save_run_id_path is not None:
+        os.makedirs(
+            os.path.dirname(os.path.abspath(args.save_run_id_path)), exist_ok=True
+        )
+        with open(args.save_run_id_path, "w", encoding="utf8") as f:
+            f.write(args.run_id)
 
     model_checkpoint: ModelCheckpoint = callbacks[2]
     best_score: Optional[torch.Tensor] = model_checkpoint.best_model_score

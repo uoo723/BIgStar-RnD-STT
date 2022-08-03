@@ -137,3 +137,6 @@ _assets/
 
 # vscode
 .vscode/
+
+# misc
+run_id
