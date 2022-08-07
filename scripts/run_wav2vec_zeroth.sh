@@ -25,7 +25,7 @@ args=(
     --seed $1
     --swa-warmup 0
     --eval-step 2000
-    --early 50
+    --early 100
     --mp-enabled
     --gradient-max-norm 5.0
     --num-workers 8
