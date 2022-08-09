@@ -34,6 +34,8 @@ args=(
     --run-id $RUN_ID
     --load-only-weights
     --load-best
+    --skip-test
+    --save-run-id-path "./run_id_2"
 )
 
 python main.py train-wav2vec "${args[@]}"
