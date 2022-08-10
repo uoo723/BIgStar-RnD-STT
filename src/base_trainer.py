@@ -595,6 +595,8 @@ def test(
 ) -> Dict[str, float]:
     # assert args.run_id is not None, "run_id must be specified"
 
+    ckpt_path = None
+
     if args.run_id is not None:
         ckpt_path = get_ckpt_path(
             args.log_dir, args.run_id, load_best=not args.load_last
@@ -619,6 +621,9 @@ def test(
             logger=False,
         )
     else:
+        assert ckpt_path is not None
+
+        trainer.ckpt_path = ckpt_path
         trainer_model = None
 
     results = trainer.test(trainer_model, verbose=False)
